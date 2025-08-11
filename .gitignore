@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+
+# Logs
+*.log
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+
+# Package manager lock files (keep only pnpm)
+package-lock.json
+yarn.lock
+
+# Test reports
+*test-report*.json

@@ -1,0 +1,66 @@
+{
+  "name": "purifai",
+  "version": "1.0.0",
+  "description": "The #1 HTML sanitizer - 100% security success rate AND fastest performance. Outperforms DOMPurify, js-xss, bleach-js and all competitors in comprehensive testing.",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "tsup index.ts --format cjs,esm --dts --clean",
+    "prepublishOnly": "pnpm run build",
+    "dev": "tsup index.ts --format cjs,esm --dts --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "sanitizer",
+    "xss",
+    "security",
+    "html",
+    "sanitize",
+    "polyglot",
+    "typescript",
+    "zero-dependencies",
+    "lightweight",
+    "fast",
+    "secure",
+    "anti-xss",
+    "html-sanitizer",
+    "xss-protection",
+    "sanitization",
+    "frontend",
+    "backend",
+    "nodejs",
+    "browser"
+  ],
+  "author": "Purifai Team <moji2002@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/moji2002/purifai#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moji2002/purifai.git"
+  },
+  "bugs": {
+    "url": "https://github.com/moji2002/purifai/issues"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2"
+  }
+}

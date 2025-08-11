@@ -1,0 +1,3 @@
+# Exclude non-distribution folders
+examples/
+test/
