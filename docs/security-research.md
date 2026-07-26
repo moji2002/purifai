@@ -192,9 +192,20 @@ design, not just a nicety.
 
 ## 7. Still open
 
-1. **jsdom is not a browser.** Its parser is close to but not identical with
-   Chrome's or Firefox's, and mXSS lives precisely in those differences. Real
-   confidence needs Playwright running the corpus in actual engines.
+1. ~~**jsdom is not a browser.**~~ **Closed.** `test/browser-verify.js` now runs
+   the full 84-vector corpus through **real Google Chrome** via Playwright, and
+   checks two things jsdom cannot: the parsed tree after a serialize→reparse
+   round trip, and whether anything actually *executed* (`<img src=x onerror>`
+   fires on its own in a real engine; jsdom never runs it).
+
+   **[empirical]** Result: 84 vectors, 0 sanitize errors, 0 static threats,
+   **0 executed**. A positive control — an unsanitized payload — is run last and
+   must fire; if it does not, the run is reported as a failure rather than a
+   pass, because a green result from a detector that cannot detect anything is
+   worse than a red one. The control fired.
+
+   Remaining: only Chromium is covered. Firefox and WebKit have their own parser
+   quirks, and the PortSwigger mXSS research documents browser-specific vectors.
 2. **Not published.** The working tree is 2.0.0 (removing `allowBasicHtml` breaks
    types, so semver requires a major); npm still serves 1.0.0 with all the
    defects in §5.

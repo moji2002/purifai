@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>purifai browser verification</title></head>
+<body>
+<div id="sink"></div>
+<pre id="out">running…</pre>
+<script type="module">
+/**
+ * Real-engine verification.
+ *
+ * jsdom's parser is close to, but not identical with, a browser's — and mutation
+ * XSS lives exactly in those differences. This harness runs the corpus through a
+ * genuine engine and checks two things:
+ *
+ *   1. STATIC  — does the parsed tree contain a script node, an on* handler, or
+ *                a dangerous-protocol URL, after a serialize -> reparse round trip?
+ *   2. DYNAMIC — did anything actually FIRE? `<img src=x onerror=...>` executes on
+ *                its own in a real browser, which jsdom does not reproduce. This
+ *                is the check jsdom cannot give us.
+ */
+import { Purifai } from '../dist/index.js';
+import { ATTACK_VECTORS, MODERN_VECTORS } from './vectors.js';
+
+const ALL = [...ATTACK_VECTORS, ...MODERN_VECTORS];
+
+// Any execution at all trips this flag.
+window.__fired = [];
+for (const fn of ['alert', 'prompt', 'confirm', 'print']) {
+  window[fn] = (...a) => { window.__fired.push(`${fn}(${a.join(',')})`); };
+}
+window.addEventListener('error', (e) => {
+  // Inline handler syntax errors also indicate injected code reached the parser.
+  window.__fired.push('error: ' + (e.message || '').slice(0, 60));
+}, true);
+
+const DANGEROUS_URL = /^\s*(?:javascript|vbscript|livescript|mocha|data)\s*:/i;
+const URL_ATTRS = new Set(['href','src','action','formaction','xlink:href','data','poster','srcdoc']);
+
+function staticThreats(root) {
+  const found = [];
+  for (const el of root.querySelectorAll('*')) {
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'script') found.push('script node');
+    for (const attr of Array.from(el.attributes)) {
+      const n = attr.name.toLowerCase();
+      if (n.startsWith('on')) found.push(`${tag}[${n}]`);
+      if (URL_ATTRS.has(n) && DANGEROUS_URL.test(attr.value)) found.push(`${tag}[${n}]`);
+    }
+  }
+  return found;
+}
+
+const sink = document.getElementById('sink');
+const results = { total: ALL.length, staticFails: [], dynamicFails: [], sanitizeErrors: [] };
+
+for (const vector of ALL) {
+  let out;
+  try {
+    out = Purifai.sanitize(vector);
+  } catch (e) {
+    results.sanitizeErrors.push({ vector: vector.slice(0, 60), error: String(e.message) });
+    continue;
+  }
+
+  const before = window.__fired.length;
+
+  sink.innerHTML = out;
+  const first = staticThreats(sink);
+  const serialized = sink.innerHTML;
+  sink.innerHTML = serialized;          // round trip: where mXSS surfaces
+  const second = staticThreats(sink);
+
+  const threats = [...new Set([...first, ...second])];
+  if (threats.length) results.staticFails.push({ vector: vector.slice(0, 60), threats });
+
+  // Give automatic handlers (img onerror on a broken src) a chance to run.
+  await new Promise((r) => setTimeout(r, 0));
+  if (window.__fired.length > before) {
+    results.dynamicFails.push({ vector: vector.slice(0, 60), fired: window.__fired.slice(before) });
+  }
+}
+
+// Positive control: prove the harness can actually detect execution. If this
+// does NOT fire, the whole run is meaningless and must not be reported as a pass.
+const controlBefore = window.__fired.length;
+sink.innerHTML = '<img src=x onerror="alert(1)">';
+await new Promise((r) => setTimeout(r, 50));
+results.controlFired = window.__fired.length > controlBefore;
+
+sink.innerHTML = '';
+document.getElementById('out').textContent = JSON.stringify(results, null, 2);
+window.__done = true;
+window.__results = results;
+</script>
+</body>
+</html>

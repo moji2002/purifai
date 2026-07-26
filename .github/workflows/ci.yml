@@ -95,3 +95,23 @@ jobs:
             echo "--- seed $seed ---"
             PURIFAI_FUZZ_SEED=$seed PURIFAI_FUZZ_ITERATIONS=20000 node test/fuzz-test.js
           done
+
+  browser-verify:
+    # Real-engine check. jsdom's parser is close to but not identical with a
+    # browser's, and mutation XSS lives in exactly those differences.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Ensure a Chromium build is present
+        run: npx --yes playwright@1 install --with-deps chromium
+      - name: Verify no vector executes in a real engine
+        run: node test/browser-verify.js

@@ -30,7 +30,8 @@
     "test:perf": "node test/verify-performance.js",
     "prepublishOnly": "pnpm run test",
     "dev": "tsup index.ts --format cjs,esm --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:browser": "node test/browser-verify.js"
   },
   "keywords": [
     "sanitizer",
@@ -72,6 +73,7 @@
     "cli-table3": "^0.6.5",
     "isomorphic-dompurify": "^3.19.0",
     "jsdom": "^29.1.1",
+    "playwright-core": "^1.62.0",
     "sanitize-html": "^2.17.6",
     "tsup": "^8.5.1",
     "typescript": "^7.0.2",
