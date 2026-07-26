@@ -1,6 +1,20 @@
 #!/usr/bin/env node
+/**
+ * Performance + critical-attack verification against the built bundle.
+ *
+ * Previously this file `require()`d a nonexistent `./index-compressed.js` from
+ * a `"type": "module"` package, so it could never run. It now measures the
+ * actual published artifact in dist/.
+ */
 
-const { Purifai } = require('./index-compressed.js');
+import fs from 'fs';
+import zlib from 'zlib';
+import { fileURLToPath } from 'url';
+import path from 'path';
+import { Purifai } from '../dist/index.js';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const esmBundle = path.join(here, '..', 'dist', 'index.js');
 
 // Test inputs
 const testInputs = [
@@ -66,16 +80,19 @@ for (const attack of criticalAttacks) {
 console.log(`\n📊 Critical Attack Results: ${blockedCount}/${criticalAttacks.length} blocked`);
 
 // Bundle size
-const fs = require('fs');
-const stats = fs.statSync('./index-compressed.js');
-console.log(`\n📦 Bundle Size: ${stats.size} bytes (${(stats.size/1024).toFixed(1)}KB)`);
+const stats = fs.statSync(esmBundle);
+console.log(`\n📦 Bundle Size: ${stats.size} bytes (${(stats.size / 1024).toFixed(1)}KB)`);
 
-const { execSync } = require('child_process');
+// Gzip in-process: no shell, no dependency on a `gzip` binary.
 try {
-    const gzippedSize = execSync('gzip -c index-compressed.js | wc -c', { encoding: 'utf8' }).trim();
-    console.log(`📦 Gzipped Size: ${gzippedSize} bytes (${(gzippedSize/1024).toFixed(1)}KB)`);
-} catch (e) {
+    const gzippedSize = zlib.gzipSync(fs.readFileSync(esmBundle)).length;
+    console.log(`📦 Gzipped Size: ${gzippedSize} bytes (${(gzippedSize / 1024).toFixed(1)}KB)`);
+} catch {
     console.log('📦 Gzipped Size: Could not calculate');
 }
 
 console.log('\n✅ Verification complete!');
+
+if (blockedCount !== criticalAttacks.length) {
+    process.exit(1);
+}

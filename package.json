@@ -1,7 +1,7 @@
 {
   "name": "purifai",
-  "version": "1.0.0",
-  "description": "The #1 HTML sanitizer - 100% security success rate AND fastest performance. Outperforms DOMPurify, js-xss, bleach-js and all competitors in comprehensive testing.",
+  "version": "2.0.0",
+  "description": "Zero-dependency strip-to-text HTML sanitizer with contextual output encoding (HTML, attribute, URL). ~4.1KB gzipped, no DOM required - runs in Node, browsers and edge runtimes.",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -19,9 +19,17 @@
   ],
   "type": "module",
   "scripts": {
-    "build": "tsup index.ts --format cjs,esm --dts --clean",
-    "prepublishOnly": "pnpm run build",
-    "dev": "tsup index.ts --format cjs,esm --dts --watch",
+    "build": "tsup index.ts --format cjs,esm --clean && pnpm run build:dts",
+    "build:dts": "tsc -p tsconfig.dts.json && node -e \"require('fs').copyFileSync('dist/index.d.ts','dist/index.d.cts')\"",
+    "test": "pnpm run build && node test/security-test.js && node test/regression-test.js && node test/fuzz-test.js && node test/fair-benchmark.js",
+    "test:fuzz": "node test/fuzz-test.js",
+    "test:security": "node test/security-test.js",
+    "test:regression": "node test/regression-test.js",
+    "test:bench": "node test/comprehensive-test.js",
+    "test:fair": "node test/fair-benchmark.js",
+    "test:perf": "node test/verify-performance.js",
+    "prepublishOnly": "pnpm run test",
+    "dev": "tsup index.ts --format cjs,esm --watch",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
@@ -59,8 +67,14 @@
     "node": ">=14.0.0"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "tsup": "^8.5.0",
-    "typescript": "^5.9.2"
+    "@types/node": "^26.0.0",
+    "chalk": "^6.0.0",
+    "cli-table3": "^0.6.5",
+    "isomorphic-dompurify": "^3.19.0",
+    "jsdom": "^29.1.1",
+    "sanitize-html": "^2.17.6",
+    "tsup": "^8.5.1",
+    "typescript": "^7.0.2",
+    "xss": "^1.0.15"
   }
 }

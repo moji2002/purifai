@@ -5,44 +5,54 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-green.svg)](https://www.npmjs.com/package/purifai)
 
-> **Ultra-Secure HTML Sanitizer with Advanced XSS Protection**
+> **Zero-dependency strip-to-text sanitizer with contextual output encoding**
 
-Purifai is a lightweight, zero-dependency HTML sanitizer that provides **industry-leading XSS protection**. In comprehensive testing against 64 sophisticated attack vectors, Purifai achieved a **100% security success rate** - the only library to block all attacks including advanced polyglot vectors that bypass other popular sanitizers.
+Purifai is a lightweight, zero-dependency sanitizer for the **strip-to-text** case:
+untrusted content that must be displayed as text, never as markup. It removes all
+HTML rather than allow-listing safe tags, which makes it immune to mutation XSS by
+construction — nothing survives for a parser to mutate on re-parse.
+
+**Reach for Purifai when** you want untrusted input rendered as plain text, with no
+dependencies, no DOM, and a ~4.1 KB gzipped footprint that runs in Node, browsers,
+and edge runtimes alike.
+
+**Reach for DOMPurify or sanitize-html when** you need to *keep* safe formatting
+such as `<b>` and `<a href>`. That is a harder problem and they solve it well.
 
 ## 🏆 Benchmark Results
 
-### Security Performance (64 Attack Vectors)
+Produced by `pnpm test:fair`. Each sanitizer's output is inserted into a real DOM
+(jsdom), then serialized and re-parsed — the round trip where mutation XSS lives.
+A vector counts as blocked only if *neither* parse yields a script node, an `on*`
+handler, or a dangerous-protocol URL.
 
-| Library | Success Rate | Blocked | Failed | Performance Rank |
-|---------|-------------|---------|---------|------------------|
-| **🥇 Purifai** | **100.0%** | **64/64** | **0** | **#1 Security** |
-| 🥈 sanitize-html | 79.7% | 51/64 | 13 | #2 Security |
-| 🥉 DOMPurify | 62.5% | 40/64 | 24 | #3 Security |
-| node-sanitize | 56.3% | 36/64 | 28 | #4 Security |
-| xss | 20.3% | 13/64 | 51 | #5 Security |
-| validator.js | 7.8% | 5/64 | 59 | #6 Security |
+| Library | Category | Security | Text kept | Markup kept |
+|---------|----------|----------|-----------|-------------|
+| **Purifai** | strip-to-text | **100%** | **100%** | 0% *(by design)* |
+| DOMPurify | preserve-html | 100% | 100% | 100% |
+| sanitize-html | preserve-html | 100% | 100% | 100% |
+| xss | preserve-html | 100% | 100% | 100% |
+| `() => ''` *(calibration)* | — | 100% | 0% | 0% |
+| `v => v` *(calibration)* | — | 38.1% | 100% | 100% |
 
-### Performance Profile
+84 attack vectors (OWASP, PortSwigger, cure53 corpora) · 15 benign documents.
 
-| Library | Performance | Security Trade-off | Overall Score |
-|---------|-------------|-------------------|---------------|
-| **Purifai** | **⚡ Fast** | **🛡️ Perfect (100%)** | **🏆 Excellent** |
-| sanitize-html | ⚡ Moderate | 🛡️ Good (79.7%) | ✅ Good |
-| DOMPurify | 🐌 Slow | 🛡️ Fair (62.5%) | ⚠️ Fair |
-| xss | ⚡ Fast | ❌ Poor (20.3%) | ❌ Poor |
-| validator.js | ⚡ Very Fast | ❌ Very Poor (7.8%) | ❌ Unacceptable |
-| node-sanitize | ⚡ Fast | 🛡️ Fair (56.3%) | ⚠️ Fair |
-
-> 📊 **Key Insight**: Purifai achieves **perfect security (100% success rate)** - significantly better than sanitize-html (79.7%) and DOMPurify (62.5%), while maintaining fast performance comparable to leading libraries.
+> 📊 **Read this honestly.** On security there is no headroom left — every
+> maintained sanitizer above blocks everything thrown at it. The calibration rows
+> are the whole point: a function returning `''` also scores 100% security, which
+> is why a security number means nothing without a fidelity axis beside it.
+> Purifai's 0% markup retention is its design, not a defect — but it does mean
+> Purifai is **not** "more secure than DOMPurify". It is smaller, dependency-free,
+> and needs no DOM.
 
 ## 🚀 Why Purifai?
 
-### ✅ Unmatched Security
-- **100% success rate** against all tested attack vectors
-- Blocks advanced **polyglot attacks** that bypass other sanitizers
+### ✅ Security
+- Blocks every vector in the 84-payload corpus, verified by real DOM re-parse
 - Handles **Unicode**, **HTML entity**, and **URL encoding** bypasses
 - Prevents **template injection** and **CSS expression** attacks
-- Mitigates **namespace confusion** and **DOM clobbering** techniques
+- Immune to **mutation XSS** by construction: it emits no markup to mutate
+- Contextual encoders for HTML body, attribute, and URL contexts
 
 ### ⚡ High Performance
 - **Fast processing** - optimized algorithms for high-throughput applications
@@ -58,11 +68,11 @@ Purifai is a lightweight, zero-dependency HTML sanitizer that provides **industr
 
 ## 🔥 Attack Vectors Blocked
 
-Purifai successfully blocks **all 64 tested attack vectors**, including:
+Purifai blocks **all 84 vectors** in the corpus (64 classic + 20 modern mXSS/namespace), including:
 
-### Critical Polyglot Attacks (Others Failed)
+### Critical Polyglot Attacks
 ```javascript
-// ✅ Purifai blocks these advanced attacks that bypass other sanitizers:
+// ✅ Purifai reduces each of these to empty output:
 
 // Universal XSS Polyglot
 jaVasCript:/*-/*`/*\`/*'/*"/**/(/* */oNcliCk=alert() )//%0D%0A%0d%0a//</stYle/</titLe/</teXtarEa/</scRipt/--!>\x3csVg/<sVg/oNloAd=alert()///>\\x3e
@@ -106,7 +116,6 @@ console.log(clean); // "Hello World"
 // With options
 const safe = Purifai.sanitize(userInput, {
   maxLength: 10000,
-  allowBasicHtml: false,
   aggressiveMode: true
 });
 ```
@@ -150,15 +159,40 @@ if (isDangerous(userInput)) {
 }
 ```
 
+### Contextual Escaping
+
+`sanitize()` treats its input as HTML and removes markup. When the input is
+**plain text**, escaping is the better tool — it is lossless, and no guessing is
+involved. These follow OWASP's context-specific output encoding guidance.
+
+```typescript
+import { escape, escapeAttribute, escapeUrl } from 'purifai';
+
+// HTML body context — lossless, nothing is removed
+escape('if (a<b && c>d) return;');
+// "if (a&lt;b &amp;&amp; c&gt;d) return;"
+
+// Attribute context — safe even unquoted, since a bare space or
+// backtick could otherwise close the value and start onerror=
+`<div title="${escapeAttribute(userInput)}">`;
+
+// URL context — returns '' when the protocol is not allow-listed
+escapeUrl('https://example.com'); // escaped, safe for href
+escapeUrl('javascript:alert(1)'); // ""
+escapeUrl('java\tscript:alert(1)'); // "" (whitespace-split protocols too)
+```
+
+Why both exist: `a<b && c>d` is a valid HTML start tag per the parsing spec, so
+`sanitize()` correctly drops it while `escape()` preserves it verbatim. Only the
+caller knows whether a string is markup or text — so the API asks rather than
+guesses.
+
 ## ⚙️ Configuration Options
 
 ```typescript
 interface PurifaiOptions {
   /** Maximum input length (default: 1MB) */
   maxLength?: number;
-  
-  /** Allow safe HTML tags like <b>, <i>, <p> (default: false) */
-  allowBasicHtml?: boolean;
   
   /** Custom allowed protocols (default: ['http', 'https', 'mailto']) */
   allowedProtocols?: string[];
@@ -193,19 +227,16 @@ Our comprehensive test suite evaluates sanitizers against:
 
 ### Security Comparison by Attack Type
 
-| Attack Category | Purifai | sanitize-html | DOMPurify | node-sanitize | xss | validator.js |
-|----------------|---------|---------------|-----------|---------------|-----|-------------|
-| Basic XSS | ✅ 100% | ✅ 95% | ✅ 90% | ✅ 82% | ❌ 20% | ❌ 8% |
-| Polyglot Attacks | ✅ 100% | ❌ 33% | ❌ 0% | ❌ 25% | ❌ 0% | ❌ 0% |
-| Encoding Bypasses | ✅ 100% | ❌ 25% | ❌ 0% | ❌ 33% | ❌ 0% | ❌ 0% |
-| Template Injection | ✅ 100% | ❌ 20% | ❌ 20% | ❌ 0% | ❌ 0% | ❌ 0% |
-| Protocol Injection | ✅ 100% | ❌ 0% | ❌ 0% | ❌ 20% | ❌ 0% | ❌ 0% |
+Superseded by the two-axis benchmark above. The per-category percentages that
+used to sit here came from a scoring rule that counted "output is empty" as a
+win, so it rewarded deletion rather than safety and marked correct competitor
+behaviour as failure. Run `pnpm test:fair` for numbers that survive scrutiny.
 
 ### Bundle Size Comparison
 
 | Library | Bundle Size | Dependencies | TypeScript |
 |---------|-------------|--------------|-------------|
-| **Purifai** | **~12KB** | **0** | **✅ Native** |
+| **Purifai** | **13.6KB / 4.1KB gzip** | **0** | **✅ Native** |
 | validator.js | ~15KB | 0 | ✅ Available |
 | xss | ~25KB | 3 | ❌ None |
 | node-sanitize | ~32KB | 5 | ❌ None |
@@ -225,9 +256,10 @@ app.post('/comments', (req, res) => {
 
 ### Content Management Systems
 ```typescript
-// Clean rich text editor content
-const cleanHtml = Purifai.sanitize(editorContent, {
-  allowBasicHtml: true,
+// Reduce rich text editor content to safe plain text.
+// Note: Purifai strips ALL markup. If you need to KEEP <b>/<a href>,
+// use DOMPurify or sanitize-html instead - that is a different job.
+const cleanText = Purifai.sanitize(editorContent, {
   maxLength: 50000
 });
 ```
@@ -272,9 +304,9 @@ const clean = sanitizeHtml(dirty, options);
 
 // After
 import { sanitize } from 'purifai';
-const clean = sanitize(dirty, {
-  allowBasicHtml: true // if you need HTML tags
-});
+const clean = sanitize(dirty);
+// Purifai removes all tags. If the migration needs to KEEP safe HTML,
+// stay on sanitize-html - Purifai targets the strip-to-text case.
 ```
 
 ### From xss

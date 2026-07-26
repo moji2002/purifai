@@ -2,7 +2,10 @@
   "compilerOptions": {
     "target": "ES2020",
     "module": "ESNext",
-    "moduleResolution": "node",
+    // "node" (node10) was removed in TypeScript 7.0. "bundler" matches how this
+    // package is actually built — tsup bundles index.ts, so Node's runtime
+    // resolution rules never apply to our own imports.
+    "moduleResolution": "bundler",
     "declaration": true,
     "declarationMap": true,
     "outDir": "./dist",

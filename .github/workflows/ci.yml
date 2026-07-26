@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  # Fuzzing is seeded, so scheduled runs with a rotating seed explore payloads
+  # the fixed-seed CI run never reaches.
+  schedule:
+    - cron: '0 3 * * 1'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      - name: Security suite
+        run: node test/security-test.js
+
+      - name: Regression suite
+        run: node test/regression-test.js
+
+      - name: Fuzz (fixed seed — reproducible)
+        run: node test/fuzz-test.js
+
+      - name: Fair benchmark (security + fidelity vs competitors)
+        run: node test/fair-benchmark.js
+
+      - name: Legacy 64-vector benchmark
+        run: node test/comprehensive-test.js
+
+      - name: Verify published API surface is importable
+        run: |
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            import { Purifai, sanitize, escape, escapeUrl } from './dist/index.js';
+            const pkg = JSON.parse(fs.readFileSync('./package.json', 'utf8'));
+            const checks = {
+              sanitize: sanitize('<script>alert(1)</script>Hi') === 'Hi',
+              escape: escape('a<b') === 'a&lt;b',
+              escapeUrl: escapeUrl('javascript:alert(1)') === '',
+              version: Purifai.getVersion() === pkg.version,
+            };
+            const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([k]) => k);
+            if (failed.length) { console.error('ESM smoke failed:', failed.join(', ')); process.exit(1); }
+            console.log('ESM smoke OK');
+          "
+          node -e "
+            const { sanitize } = require('./dist/index.cjs');
+            if (sanitize('<script>alert(1)</script>Hi') !== 'Hi') { console.error('CJS smoke failed'); process.exit(1); }
+            console.log('CJS smoke OK');
+          "
+
+  fuzz-extended:
+    # Longer, differently-seeded run so a bad commit is caught by more than the
+    # one seed baked into the standard job.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Extended fuzz (rotating seeds)
+        run: |
+          for seed in 1 7 42 137 999 31337; do
+            echo "--- seed $seed ---"
+            PURIFAI_FUZZ_SEED=$seed PURIFAI_FUZZ_ITERATIONS=20000 node test/fuzz-test.js
+          done

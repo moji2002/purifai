@@ -1,0 +1,24 @@
+// Declaration-only emit for the published package.
+//
+// Why this file exists: TypeScript 7.0 dropped the legacy JS compiler API
+// (`ts.sys`, `ts.createProgram`, `ts.createSourceFile` are all undefined), so
+// `tsup --dts` crashes — its rollup-plugin-dts step reads those internals.
+// `tsc` itself emits declarations fine, so the build pipeline is now:
+//   tsup (esbuild) -> dist/index.js + dist/index.cjs
+//   tsc            -> dist/index.d.ts (copied to index.d.cts)
+//
+// Safe here because index.ts imports nothing: there is no cross-file graph for
+// a declaration bundler to flatten, so tsc's per-file emit is equivalent to the
+// rolled-up output rollup-plugin-dts used to produce.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    // The published dist has never shipped .d.ts.map files; don't start now.
+    "declarationMap": false,
+    "outDir": "./dist"
+  },
+  // Only the package entrypoint — never the test scripts.
+  "include": ["index.ts"]
+}
