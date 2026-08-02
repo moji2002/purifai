@@ -96,29 +96,3 @@ export const MODERN_VECTORS = [
   '<meta http-equiv=refresh content="0;url=javascript:alert(1)">',
   '<div style="width:expression(alert(1))">'
 ];
-
-/**
- * Benign content that a sanitizer SHOULD preserve. This is the fidelity axis:
- * a sanitizer that deletes everything is perfectly secure and useless, so
- * security cannot be scored without measuring what survives alongside it.
- *
- * `text` is the reader-visible content that must survive in every case.
- * `tags` are safe elements a preserving sanitizer is expected to keep.
- */
-export const BENIGN_CORPUS = [
-  { html: '<p>Hello <b>world</b></p>', text: 'Hello world', tags: ['p', 'b'] },
-  { html: '<a href="https://example.com">link</a>', text: 'link', tags: ['a'] },
-  { html: '<ul><li>one</li><li>two</li></ul>', text: 'onetwo', tags: ['ul', 'li'] },
-  { html: '<em>emphasis</em> and <strong>strong</strong>', text: 'emphasis and strong', tags: ['em', 'strong'] },
-  { html: '<blockquote>quoted text</blockquote>', text: 'quoted text', tags: ['blockquote'] },
-  { html: '<code>const x = 1;</code>', text: 'const x = 1;', tags: ['code'] },
-  { html: '<p>Line one<br>Line two</p>', text: 'Line oneLine two', tags: ['p', 'br'] },
-  { html: '<h2>Heading</h2><p>Body copy.</p>', text: 'HeadingBody copy.', tags: ['h2', 'p'] },
-  { html: 'Plain text, no markup at all.', text: 'Plain text, no markup at all.', tags: [] },
-  { html: 'Price is 100% of $5 (five dollars).', text: 'Price is 100% of $5 (five dollars).', tags: [] },
-  { html: 'Email me at someone@example.com', text: 'Email me at someone@example.com', tags: [] },
-  { html: 'Visit https://example.com/path?a=1&b=2 today', text: 'Visit https://example.com/path?a=1&b=2 today', tags: [] },
-  { html: '5 < 6 and 7 > 3', text: '5 < 6 and 7 > 3', tags: [] },
-  { html: 'Résumé — naïve café 日本語 🎉', text: 'Résumé — naïve café 日本語 🎉', tags: [] },
-  { html: '<p>Multi<br>line<br>text</p>', text: 'Multilinetext', tags: ['p', 'br'] }
-];

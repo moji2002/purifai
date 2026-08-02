@@ -2,116 +2,140 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-  # Fuzzing is seeded, so scheduled runs with a rotating seed explore payloads
-  # the fixed-seed CI run never reaches.
-  schedule:
-    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  test:
+  core:
+    name: Core / Node ${{ matrix.node }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 22, 24]
-
+        node: [22, 24, 26]
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
           cache: pnpm
-
       - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:core
 
-      - name: Type check
-        run: pnpm typecheck
-
-      - name: Build
-        run: pnpm build
-
-      - name: Security suite
-        run: node test/security-test.js
-
-      - name: Regression suite
-        run: node test/regression-test.js
-
-      - name: Fuzz (fixed seed — reproducible)
-        run: node test/fuzz-test.js
-
-      - name: Fair benchmark (security + fidelity vs competitors)
-        run: node test/fair-benchmark.js
-
-      - name: Legacy 64-vector benchmark
-        run: node test/comprehensive-test.js
-
-      - name: Verify published API surface is importable
-        run: |
-          node --input-type=module -e "
-            import fs from 'node:fs';
-            import { Purifai, sanitize, escape, escapeUrl } from './dist/index.js';
-            const pkg = JSON.parse(fs.readFileSync('./package.json', 'utf8'));
-            const checks = {
-              sanitize: sanitize('<script>alert(1)</script>Hi') === 'Hi',
-              escape: escape('a<b') === 'a&lt;b',
-              escapeUrl: escapeUrl('javascript:alert(1)') === '',
-              version: Purifai.getVersion() === pkg.version,
-            };
-            const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([k]) => k);
-            if (failed.length) { console.error('ESM smoke failed:', failed.join(', ')); process.exit(1); }
-            console.log('ESM smoke OK');
-          "
-          node -e "
-            const { sanitize } = require('./dist/index.cjs');
-            if (sanitize('<script>alert(1)</script>Hi') !== 'Hi') { console.error('CJS smoke failed'); process.exit(1); }
-            console.log('CJS smoke OK');
-          "
-
-  fuzz-extended:
-    # Longer, differently-seeded run so a bad commit is caught by more than the
-    # one seed baked into the standard job.
+  runtimes:
+    name: Packed runtime matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
         with:
-          version: 10
-      - uses: actions/setup-node@v4
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.8.1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:runtimes
+
+  worker:
+    name: Cloudflare workerd
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - name: Extended fuzz (rotating seeds)
-        run: |
-          for seed in 1 7 42 137 999 31337; do
-            echo "--- seed $seed ---"
-            PURIFAI_FUZZ_SEED=$seed PURIFAI_FUZZ_ITERATIONS=20000 node test/fuzz-test.js
-          done
+      - run: pnpm run test:cloudflare
+        env:
+          PURIFAI_TOOL_COMMAND: direct
 
-  browser-verify:
-    # Real-engine check. jsdom's parser is close to but not identical with a
-    # browser's, and mutation XSS lives in exactly those differences.
+  browsers:
+    name: Chromium, Firefox, WebKit
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - name: Ensure a Chromium build is present
-        run: npx --yes playwright@1 install --with-deps chromium
-      - name: Verify no vector executes in a real engine
-        run: node test/browser-verify.js
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - run: pnpm run test:browsers
+      - name: Upload browser traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-traces
+          path: test-results/*.zip
+          if-no-files-found: ignore
+          retention-days: 7
+
+  resource:
+    name: Size and adversarial scaling
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:size
+      - run: pnpm run test:scaling
+
+  benchmark:
+    name: Saved benchmark gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run bench:check
+      - uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-v3-raw
+          path: benchmark/results/v3.json
+          if-no-files-found: error
+          retention-days: 30
+
+  docs:
+    name: Documentation and examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:docs

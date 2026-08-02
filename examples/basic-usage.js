@@ -1,27 +1,32 @@
-import {
-  analyze,
-  escape,
-  escapeAttribute,
-  escapeUrl,
-  sanitize,
-  sanitizeBatch,
-} from 'purifai';
+import { convert, createTextTransform } from 'purifai';
 
-// Convert markup-bearing input to reader text. All tags are removed.
-const comment = sanitize('<script>bad()</script><p>Hello <b>world</b></p>');
-console.log(comment); // Hello world
+/**
+ * Convert a complete server-side value while returning useful limit metadata.
+ */
+export function extractPreview(html, maxOutput = 20_000) {
+  return convert(html, {
+    links: 'label-and-url',
+    limits: {
+      input: 1_000_000,
+      output: maxOutput,
+      depth: 64,
+      token: 65_536,
+    },
+    overflow: 'truncate',
+  });
+}
 
-// Plain text should use the encoder for its destination context.
-console.log(escape('a<b && c>d'));
-console.log(escapeAttribute('x onmouseover=bad()'));
-console.log(escapeUrl('https://example.com/docs'));
-console.log(escapeUrl('javascript:alert(1)')); // ""
+/**
+ * Convert a fetch Response body without materializing the complete HTML input.
+ */
+export function streamHtmlResponse(response) {
+  if (response.body === null) throw new TypeError('Response has no body');
 
-console.log(sanitizeBatch([
-  '<style>body{display:none}</style><p>First</p>',
-  '<iframe>hidden</iframe><p>Second</p>',
-])); // ["First", "Second"]
-
-// Analysis is advisory telemetry. A transformation or threat classification is
-// not an authorization decision and should not block an otherwise valid user.
-console.log(analyze('<script>bad()</script>Hello'));
+  const transform = createTextTransform();
+  return Object.freeze({
+    readable: response.body
+      .pipeThrough(new TextDecoderStream())
+      .pipeThrough(transform),
+    result: transform.result,
+  });
+}

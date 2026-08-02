@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify and publish to npm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: npm
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.8.1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - name: Install trusted-publishing npm CLI
+        run: npm install --global npm@11.18.0
+      - name: Verify tag matches package version
+        run: >-
+          node -e "const p=require('./package.json');
+          if(process.env.GITHUB_REF_TYPE!=='tag'||process.env.GITHUB_REF_NAME!=='v'+p.version){
+          throw new Error('Release ref must be the exact tag v'+p.version)}"
+      - run: pnpm run test:release
+      - name: Publish with OIDC provenance
+        run: npm publish --access public --provenance
+      - name: Verify published digest and source provenance
+        run: node scripts/verify-release.mjs --postpublish=${GITHUB_REF_NAME#v}
+        env:
+          GITHUB_SHA: ${{ github.sha }}

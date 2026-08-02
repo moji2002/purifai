@@ -1,27 +1,33 @@
-import express from 'express';
-import { analyze } from 'purifai';
+import { PurifaiLimitError, toText } from 'purifai';
 
-const app = express();
-app.use(express.json());
+/**
+ * Express-style middleware that derives readable text from req.body.html.
+ * It rejects oversized input instead of rewriting every request field.
+ */
+export function readableTextBody({ maxInput = 100_000, maxOutput = 25_000 } = {}) {
+  return function convertHtmlBody(req, res, next) {
+    const html = req.body?.html;
+    if (typeof html !== 'string') {
+      return res.status(400).json({ error: 'HTML_STRING_REQUIRED' });
+    }
 
-app.post('/comments', (req, res) => {
-  if (typeof req.body?.comment !== 'string') {
-    return res.status(400).json({ error: 'comment must be a string' });
-  }
-
-  const result = analyze(req.body.comment, { maxLength: 10_000 });
-
-  // The analysis fields are useful for telemetry, but they are heuristic and
-  // must not replace authentication, authorization, schema validation, or rate
-  // limiting. Store only the field whose product contract is plain text.
-  console.info({
-    markupWarning: result.hadThreats,
-    threatLevel: result.threatLevel,
-  });
-
-  return res.status(201).json({
-    comment: result.content,
-  });
-});
-
-app.listen(3000);
+    try {
+      req.body.text = toText(html, {
+        limits: {
+          input: maxInput,
+          output: maxOutput,
+          depth: 64,
+          token: 65_536,
+        },
+      });
+      return next();
+    } catch (error) {
+      if (!(error instanceof PurifaiLimitError)) return next(error);
+      return res.status(413).json({
+        error: `HTML_${error.kind.toUpperCase()}_LIMIT`,
+        limit: error.limit,
+        observed: error.observed,
+      });
+    }
+  };
+}

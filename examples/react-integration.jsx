@@ -1,20 +1,31 @@
 import { useMemo } from 'react';
-import { sanitize } from 'purifai';
+import { toText } from 'purifai';
 
-export function UserComment({ comment }) {
-  const plainText = useMemo(() => sanitize(comment.html), [comment.html]);
+/**
+ * React escapes text children. No raw-HTML escape hatch is needed here.
+ */
+export function ArticlePreview({ html }) {
+  const text = useMemo(
+    () => toText(html, {
+      links: 'label-and-url',
+      limits: { input: 200_000, output: 50_000 },
+    }),
+    [html],
+  );
 
-  // React text interpolation performs output escaping. Purifai has already
-  // reduced the source markup to reader text; no HTML injection sink is needed.
+  return <pre className="article-preview">{text}</pre>;
+}
+
+/**
+ * Convert plain string fields only when they are documented to contain HTML.
+ */
+export function Comment({ author, html }) {
+  const text = useMemo(() => toText(html), [html]);
+
   return (
     <article>
-      <h2>{comment.author}</h2>
-      <p>{plainText}</p>
+      <strong>{author}</strong>
+      <p>{text}</p>
     </article>
   );
 }
-
-// If safe formatting must survive, use a maintained allow-list sanitizer such
-// as DOMPurify. Purifai's sanitize() contract is plain text only. The
-// escapeAttribute()/escapeUrl() APIs target serialized HTML; do not double-
-// encode their output through React's JSX escaping.

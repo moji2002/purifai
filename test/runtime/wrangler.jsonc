@@ -1,0 +1,5 @@
+{
+  "name": "purifai-runtime-test",
+  "main": "./worker-stub.js",
+  "compatibility_date": "2026-08-02"
+}

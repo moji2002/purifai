@@ -28,7 +28,8 @@
   },
   "include": [
     "index.ts",
-    "test/**/*.ts"
+    "src/**/*.ts",
+    "test/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

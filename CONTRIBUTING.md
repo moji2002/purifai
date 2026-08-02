@@ -1,52 +1,68 @@
 # Contributing to Purifai
 
-Thanks for your interest in contributing! We appreciate your time and effort.
+Purifai is a bounded, streaming HTML-to-readable-text converter. Contributions
+should preserve its fixed policy, chunk invariance, resource bounds, portability,
+and zero-runtime-dependency contract.
 
-## Code of Conduct
+## Setup
 
-Be respectful and constructive. We follow the standard [Contributor Covenant](https://www.contributor-covenant.org/). Treat everyone with kindness.
+Requirements: Node.js 22 or newer and the pnpm version declared in
+`package.json`.
 
-## Getting Started
+```sh
+pnpm install --frozen-lockfile
+pnpm run build
+pnpm run test:core
+```
 
-1. Fork the repo and create your branch from `main`
-2. Install dependencies with `pnpm install`
-3. Build with `pnpm run build`
-4. Run tests with `pnpm test` (add tests if you change behavior)
+## Verification commands
 
-## Development
+Use the narrowest relevant check while developing, then run the affected release
+gate before opening a pull request.
 
-- Use TypeScript and keep code self-explanatory
-- Prefer small, focused PRs
-- Include unit tests for new features and bug fixes
-- Keep performance and security in mind (this is a sanitizer)
-- Match existing code style and formatting
+| Area | Command |
+| --- | --- |
+| Types, entities, unit, fuzz, sinks, package | `pnpm run test:core` |
+| Node, Bun, Deno packed consumers | `pnpm run test:runtimes` |
+| Cloudflare `workerd` | `pnpm run test:cloudflare` |
+| Chromium, Firefox, WebKit | `pnpm run test:browsers` |
+| Runtime/package size | `pnpm run test:size` |
+| Adversarial time and memory scaling | `pnpm run test:scaling` |
+| Saved category gates | `pnpm run bench:check` |
+| Documentation and runnable examples | `pnpm run test:docs` |
+| Complete local qualification | `pnpm run test:release` |
 
-## Commit Messages
+The benchmark command, `pnpm run bench`, replaces the checked raw result and
+report. Only do that when intentionally collecting a new canonical run, and
+include the environment and result changes in review.
 
-- Use conventional commits
-  - `feat:` new feature
-  - `fix:` bug fix
-  - `chore:` tooling/infra/docs
-  - `refactor:` code change that neither fixes a bug nor adds a feature
-- Keep the subject line concise and include a brief body explaining the why when needed
+## Code changes
 
-## Pull Requests
+- Keep runtime code Web-standard and side-effect free. Do not add Node built-ins,
+  a DOM dependency, or runtime dependencies.
+- Preserve output equality across every possible chunk partition.
+- Charge caller-controlled retained state before it grows beyond a public limit.
+- Add a focused regression test for behavior changes and hostile edge cases.
+- Regenerate entity data with `pnpm run entities:update`; verify committed data
+  with `pnpm run entities:check`.
+- Do not claim browser-equivalent HTML parsing or universal output safety.
 
-- Link related issues
-- Describe the problem and solution clearly
-- Add screenshots/benchmarks if the change affects performance
-- Ensure CI is green
+## Pull requests
 
-## Release Process
+Explain the externally visible behavior and why it belongs in Purifai's narrow
+category. Include benchmark evidence for performance-sensitive changes and state
+which qualification commands passed. Keep changes focused and use conventional
+commit subjects such as `feat:`, `fix:`, `test:`, `docs:`, or `refactor:`.
 
-- Maintainers bump version via `npm version [patch|minor|major]`
-- `pnpm run build` before publishing
-- Publish with `npm publish --access public`
+## Releases
 
-## Security
+Maintainers release through the protected provenance workflow after every local
+and CI qualification gate passes. Do not publish manually. A version, tag, npm
+trusted-publisher configuration, and workflow invocation are separate reviewed
+actions.
 
-If you find a security issue, please do not open a public issue. Instead, email `it@worksonmy.dev` with details.
+## Security reports
 
-## Questions
-
-Open a GitHub Discussion or issue if you need help.
+Do not open a public issue for a suspected vulnerability. Email
+`it@worksonmy.dev` with a reproducer, affected sink/runtime, and expected
+behavior.

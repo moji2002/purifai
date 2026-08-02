@@ -1,5 +1,9 @@
 # Purifai security research: scope, measurements, and limits
 
+> Historical note: this report documents Purifai v2.0.3. Purifai v3 replaces
+> that API and implementation; see the [v3 research review](purifai-v3-research.md)
+> and [migration guide](migration-v3.md) for the current contract.
+
 Date: 2026-08-02.
 
 Evidence labels: **[empirical]** means reproduced by the repository commands;

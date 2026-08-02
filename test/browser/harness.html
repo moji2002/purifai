@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Purifai browser qualification</title>
+  </head>
+  <body>
+    <main id="sink"></main>
+    <script type="module">
+      const modulePath = __PURIFAI_MODULE__;
+      globalThis.__purifaiBrowserResults = (async () => {
+        try {
+          const [api, harness] = await Promise.all([
+            import(modulePath),
+            import('/fixture/harness.js'),
+          ]);
+          return await harness.runBrowserQualification(api);
+        } catch (error) {
+          return {
+            artifactImport: false,
+            corpus: false,
+            chunkInvariance: false,
+            textContent: false,
+            escapedInnerHTML: false,
+            positiveControl: false,
+            failures: [`artifact import: ${error?.stack ?? error}`],
+          };
+        }
+      })();
+    </script>
+  </body>
+</html>

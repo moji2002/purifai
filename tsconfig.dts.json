@@ -7,9 +7,7 @@
 //   tsup (esbuild) -> dist/index.js + dist/index.cjs
 //   tsc            -> dist/index.d.ts (copied to index.d.cts)
 //
-// Safe here because index.ts imports nothing: there is no cross-file graph for
-// a declaration bundler to flatten, so tsc's per-file emit is equivalent to the
-// rolled-up output rollup-plugin-dts used to produce.
+// The entrypoint and its imported public declarations are emitted together.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
@@ -19,6 +17,6 @@
     "declarationMap": false,
     "outDir": "./dist"
   },
-  // Only the package entrypoint — never the test scripts.
+  // Only the package entrypoint and its declaration graph — never test scripts.
   "include": ["index.ts"]
 }
