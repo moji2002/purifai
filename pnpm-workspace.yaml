@@ -1,0 +1,6 @@
+overrides:
+  '@speed-highlight/core': 1.2.20
+
+allowBuilds:
+  esbuild: true
+  workerd: true
