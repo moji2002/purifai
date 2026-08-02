@@ -7,6 +7,11 @@
 
 > **Zero-dependency strip-to-text sanitizer with contextual output encoding**
 
+[npm](https://www.npmjs.com/package/purifai) ·
+[Project notes](https://worksonmy.dev/projects/purifai) ·
+[Runnable examples](https://github.com/moji2002/purifai/tree/main/examples) ·
+[Issues](https://github.com/moji2002/purifai/issues)
+
 Purifai is a lightweight, zero-dependency sanitizer for the **strip-to-text** case:
 untrusted content that must be displayed as text, never as markup. It removes all
 HTML rather than allow-listing safe tags. The result contains no retained markup
@@ -18,6 +23,25 @@ and edge runtimes alike.
 
 **Reach for DOMPurify or sanitize-html when** you need to *keep* safe formatting
 such as `<b>` and `<a href>`. That is a harder problem and they solve it well.
+
+## Quick start
+
+```bash
+npm install purifai
+```
+
+```typescript
+import { escape, sanitize } from 'purifai';
+
+sanitize('<script>steal()</script><p>Hello <b>world</b></p>');
+// "Hello world"
+
+escape('Use <strong>only</strong> as text');
+// "Use &lt;strong&gt;only&lt;/strong&gt; as text"
+```
+
+Use `sanitize()` when the input is HTML that should become plain text. Use a
+contextual encoder when the input is already text and must be preserved.
 
 ## Benchmark snapshot
 
@@ -89,32 +113,15 @@ seeded fuzzing, real-browser parsing, malformed raw-text containers, URL context
 validation, idempotence, and adversarial inputs from 2–128 KiB. A passing corpus
 is regression evidence, not proof against every future browser or payload.
 
-## 🛠️ Installation
+## 🛠️ Other package managers
 
 ```bash
-npm install purifai
-# or
 yarn add purifai
 # or
 pnpm add purifai
 ```
 
 ## 📖 Usage
-
-### Basic Usage
-
-```typescript
-import { Purifai } from 'purifai';
-
-// Simple sanitization
-const clean = Purifai.sanitize('<script>alert("xss")</script>Hello World');
-console.log(clean); // "Hello World"
-
-// With options
-const safe = Purifai.sanitize(userInput, {
-  maxLength: 10000
-});
-```
 
 ### Advanced Analysis
 
@@ -201,6 +208,20 @@ interface PurifaiOptions {
 `allowedProtocols` can narrow the built-in set but cannot add executable
 schemes. Protocol-relative URLs are rejected.
 
+## Scope and security boundaries
+
+- Purifai always returns text. It does not preserve safe HTML, CSS, embeds, or
+  rich-text formatting.
+- It is not a browser HTML parser and does not promise browser-equivalent error
+  recovery. The scanner deliberately follows a bounded strip-to-text contract.
+- `analyze()` and `isDangerous()` are advisory telemetry, not authentication,
+  authorization, moderation, or request-blocking decisions.
+- Output encoding is sink-specific. HTML text, attributes, and URLs require the
+  matching encoder; Purifai does not make text universally safe for JavaScript,
+  CSS, SQL, shell commands, or templates.
+- The published attack corpus is regression evidence, not a guarantee against
+  every future browser behavior or payload.
+
 ## Test Purifai in your project
 
 The example below imports only the public package API and runs with Node's
@@ -227,6 +248,11 @@ node --test purifai.test.mjs
 This is a regression example, not proof that an application is secure. Keep
 authorization separate and use the encoder for the actual output context. The
 repository-owned copy runs with `pnpm test:example`.
+
+More complete examples cover
+[basic usage](examples/basic-usage.js),
+[Express integration](examples/express-middleware.js), and
+[React rendering](examples/react-integration.jsx).
 
 ## 🧪 Testing Methodology
 
