@@ -136,6 +136,7 @@ async function verifyPublishedOnce(version, githubSha) {
 
   const temporary = validateTemporaryDirectory(await mkdtemp(join(tmpdir(), 'purifai-postpublish-')));
   try {
+    const npmCache = join(temporary, 'npm-cache');
     await writeFile(
       join(temporary, 'package.json'),
       `${JSON.stringify({ name: 'purifai-provenance-check', private: true, version: '0.0.0' }, null, 2)}\n`,
@@ -143,10 +144,12 @@ async function verifyPublishedOnce(version, githubSha) {
     );
     run('Install published artifact', npm, [
       'install', '--save-exact', '--ignore-scripts', '--no-audit', '--no-fund',
+      '--prefer-online', '--cache', npmCache,
       `${manifest.name}@${version}`,
     ], { cwd: temporary, capture: true });
     const auditOutput = run('Verify npm signatures and provenance', npm, [
       'audit', 'signatures', '--json', '--include-attestations',
+      '--cache', npmCache,
     ], { cwd: temporary, capture: true });
     const audit = JSON.parse(auditOutput);
     if (!Array.isArray(audit.verified) || audit.verified.length === 0) {
