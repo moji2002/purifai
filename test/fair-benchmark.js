@@ -12,7 +12,8 @@
  *
  * This benchmark measures two things that only mean something together:
  *
- *   SECURITY  — the sanitized output is inserted into a real DOM (jsdom), then
+ *   EXECUTABLE OUTPUT — the sanitized output is inserted into a real DOM
+ *               (jsdom), then
  *               serialized and re-parsed, because the serialize→reparse round
  *               trip is exactly where mutation XSS lives. A vector counts as
  *               blocked only if neither parse yields a script node, an on*
@@ -21,9 +22,12 @@
  *   FIDELITY  — benign documents are sanitized and checked for how much
  *               reader-visible text and how much safe markup survived.
  *
- * Deleting everything gives perfect security and zero fidelity. Doing nothing
- * gives the reverse. Both extremes appear as calibration rows so the axes can
- * be seen to discriminate.
+ *   THROUGHPUT — a same-process snapshot over the same mixed corpus. It is a
+ *                development signal, not a universal speed ranking: DOM-based,
+ *                AST-based, stripping, and encoding tools solve different jobs.
+ *
+ * Synthetic delete-all and identity controls are printed after the real package
+ * table. They audit the metric and are not competitors.
  */
 
 import { JSDOM, VirtualConsole } from 'jsdom';
@@ -32,6 +36,13 @@ import { ATTACK_VECTORS, MODERN_VECTORS, BENIGN_CORPUS } from './vectors.js';
 import { Purifai } from '../dist/index.js';
 
 const ALL_ATTACKS = [...ATTACK_VECTORS, ...MODERN_VECTORS];
+const RAW_TEXT_CORPUS = [
+  { html: 'Before<script>alert(1)</script>After', text: 'BeforeAfter' },
+  { html: 'Before<style>body{color:red}</style>After', text: 'BeforeAfter' },
+  { html: 'Before<iframe>inner</iframe>After', text: 'BeforeAfter' },
+  { html: 'Before<svg><text>hidden</text></svg>After', text: 'BeforeAfter' },
+  { html: 'Before<template><img src=x onerror=alert(1)></template>After', text: 'BeforeAfter' },
+];
 
 const DANGEROUS_URL = /^\s*(?:javascript|vbscript|livescript|mocha|data)\s*:/i;
 const URL_ATTRS = new Set(['href', 'src', 'action', 'formaction', 'xlink:href', 'data', 'poster', 'srcdoc']);
@@ -113,7 +124,7 @@ function evaluateFidelity(sanitizeFn) {
 
     // Entities decode on parse, so comparing textContent is fair to a
     // sanitizer that escapes as well as to one that preserves markup.
-    if (expectedText.length === 0 || actualText.includes(expectedText)) textKept++;
+    if (actualText === expectedText) textKept++;
 
     for (const tag of sample.tags) {
       tagsExpected++;
@@ -125,6 +136,21 @@ function evaluateFidelity(sanitizeFn) {
     textPct: (textKept / BENIGN_CORPUS.length) * 100,
     markupPct: tagsExpected === 0 ? 0 : (tagsKept / tagsExpected) * 100,
   };
+}
+
+function evaluateRawTextRemoval(sanitizeFn) {
+  let exact = 0;
+  for (const sample of RAW_TEXT_CORPUS) {
+    let output = '';
+    try {
+      output = String(sanitizeFn(sample.html) ?? '');
+    } catch {
+      // A thrown operation is not an exact result.
+    }
+    root.innerHTML = output;
+    if (normalize(root.textContent || '') === sample.text) exact++;
+  }
+  return (exact / RAW_TEXT_CORPUS.length) * 100;
 }
 
 function evaluateSecurity(sanitizeFn) {
@@ -163,12 +189,13 @@ function evaluateSecurity(sanitizeFn) {
 
 async function loadSanitizers() {
   const list = [
-    { name: 'Purifai', fn: (i) => Purifai.sanitize(i), category: 'strip-to-text' },
+    { name: 'Purifai.sanitize', fn: (i) => Purifai.sanitize(i), category: 'strip-to-text' },
+    { name: 'Purifai.escape', fn: (i) => Purifai.escape(i), category: 'encode-as-text' },
   ];
 
   try {
     const DOMPurify = (await import('isomorphic-dompurify')).default;
-    list.push({ name: 'DOMPurify', fn: (i) => DOMPurify.sanitize(i), category: 'preserve-html' });
+    list.push({ name: 'DOMPurify (jsdom)', fn: (i) => DOMPurify.sanitize(i), category: 'preserve-safe-html' });
   } catch { console.warn('DOMPurify unavailable — skipping'); }
 
   try {
@@ -179,59 +206,149 @@ async function loadSanitizers() {
         allowedTags: ['b', 'i', 'em', 'strong', 'a', 'p', 'br', 'ul', 'ol', 'li', 'blockquote', 'code', 'h2'],
         allowedAttributes: { a: ['href'] },
       }),
-      category: 'preserve-html',
+      category: 'preserve-safe-html',
     });
   } catch { console.warn('sanitize-html unavailable — skipping'); }
 
   try {
     const xss = (await import('xss')).default;
-    list.push({ name: 'xss', fn: (i) => xss(i), category: 'preserve-html' });
+    list.push({ name: 'xss', fn: (i) => xss(i), category: 'preserve-safe-html' });
   } catch { console.warn('xss unavailable — skipping'); }
 
-  // Calibration rows — these exist to prove the axes discriminate.
-  list.push({ name: '[null] () => ""', fn: () => '', category: 'calibration' });
-  list.push({ name: '[identity] v => v', fn: (v) => v, category: 'calibration' });
+  try {
+    const { rehype } = await import('rehype');
+    const rehypeSanitize = (await import('rehype-sanitize')).default;
+    const processor = rehype().use(rehypeSanitize);
+    list.push({
+      name: 'rehype-sanitize',
+      fn: (i) => String(processor.processSync(i)),
+      category: 'preserve-safe-html',
+    });
+  } catch { console.warn('rehype-sanitize unavailable — skipping'); }
+
+  try {
+    const striptags = (await import('striptags')).default;
+    list.push({ name: 'striptags', fn: (i) => striptags(i), category: 'strip-to-text' });
+  } catch { console.warn('striptags unavailable — skipping'); }
+
+  try {
+    const escapeHtml = (await import('escape-html')).default;
+    list.push({ name: 'escape-html', fn: (i) => escapeHtml(i), category: 'encode-as-text' });
+  } catch { console.warn('escape-html unavailable — skipping'); }
+
+  try {
+    const validator = (await import('validator')).default;
+    list.push({ name: 'validator.escape', fn: (i) => validator.escape(i), category: 'encode-as-text' });
+  } catch { console.warn('validator unavailable — skipping'); }
+
+  try {
+    const { escapeUTF8 } = await import('entities');
+    list.push({ name: 'entities.escapeUTF8', fn: (i) => escapeUTF8(i), category: 'encode-as-text' });
+  } catch { console.warn('entities unavailable — skipping'); }
+
+  try {
+    const { encode } = await import('html-entities');
+    list.push({ name: 'html-entities', fn: (i) => encode(i), category: 'encode-as-text' });
+  } catch { console.warn('html-entities unavailable — skipping'); }
+
+  try {
+    const he = (await import('he')).default;
+    list.push({ name: 'he.escape', fn: (i) => he.escape(i), category: 'encode-as-text' });
+  } catch { console.warn('he unavailable — skipping'); }
 
   return list;
 }
 
 const sanitizers = await loadSanitizers();
 
+const PERF_INPUTS = [
+  ...ALL_ATTACKS,
+  ...BENIGN_CORPUS.map((sample) => sample.html),
+];
+
+function measureThroughput(sanitizeFn) {
+  const warmupIterations = 500;
+  const measuredIterations = 1000;
+  const sampleCount = 7;
+  let checksum = 0;
+
+  for (let i = 0; i < warmupIterations; i++) {
+    checksum += String(sanitizeFn(PERF_INPUTS[i % PERF_INPUTS.length]) ?? '').length;
+  }
+
+  const microsecondsPerOperation = [];
+  for (let sample = 0; sample < sampleCount; sample++) {
+    const started = process.hrtime.bigint();
+    for (let i = 0; i < measuredIterations; i++) {
+      checksum += String(sanitizeFn(PERF_INPUTS[i % PERF_INPUTS.length]) ?? '').length;
+    }
+    const elapsedMicroseconds = Number(process.hrtime.bigint() - started) / 1e3;
+    microsecondsPerOperation.push(elapsedMicroseconds / measuredIterations);
+  }
+
+  // Reading the output length prevents engines from treating calls as dead work.
+  if (checksum < 0) throw new Error('unreachable checksum');
+  microsecondsPerOperation.sort((a, b) => a - b);
+  const medianUs = microsecondsPerOperation[Math.floor(sampleCount / 2)];
+  const p95Us = microsecondsPerOperation[Math.ceil(sampleCount * 0.95) - 1];
+  return {
+    medianOpsPerSecond: Math.round(1e6 / medianUs),
+    p95Us,
+  };
+}
+
 console.log('\n🔬 FAIR SANITIZER BENCHMARK');
 console.log(`   ${ALL_ATTACKS.length} attack vectors · ${BENIGN_CORPUS.length} benign documents`);
-console.log('   Security: output parsed + re-parsed in jsdom (catches mutation XSS)');
-console.log('   Fidelity: how much benign text and safe markup survived\n');
+console.log('   Executable output: parsed + re-parsed in jsdom (catches mutation XSS)');
+console.log('   Fidelity: exact visible text, safe markup, and raw-container body removal\n');
 
 const table = new Table({
-  head: ['Library', 'Category', 'Security', 'Text kept', 'Markup kept', 'Mutations', 'IE-only CSS'],
-  colWidths: [19, 16, 10, 11, 13, 11, 13],
+  head: ['Library', 'Category', 'No exec', 'Exact text', 'Markup', 'Raw body', 'Median ops/s', 'p95 µs/op'],
+  colWidths: [22, 20, 9, 12, 10, 11, 14, 11],
 });
 
 const results = [];
 for (const s of sanitizers) {
   const security = evaluateSecurity(s.fn);
   const fidelity = evaluateFidelity(s.fn);
-  results.push({ ...s, security, fidelity });
+  const rawTextPct = evaluateRawTextRemoval(s.fn);
+  const throughput = measureThroughput(s.fn);
+  results.push({ ...s, security, fidelity, rawTextPct, throughput });
   table.push([
     s.name,
     s.category,
     `${security.pct.toFixed(1)}%`,
     `${fidelity.textPct.toFixed(1)}%`,
     `${fidelity.markupPct.toFixed(1)}%`,
-    String(security.mutations),
-    String(security.legacyOnly),
+    `${rawTextPct.toFixed(1)}%`,
+    throughput.medianOpsPerSecond.toLocaleString('en-US'),
+    throughput.p95Us.toFixed(3),
   ]);
 }
 console.log(table.toString());
 
 console.log('\nHow to read this:');
-console.log('  • Security 100% + Markup 0%  = a stripper. Safe, but deletes all formatting.');
-console.log('  • Security 100% + Markup high = a preserving sanitizer doing its job well.');
-console.log('  • The two calibration rows bracket the scale; any metric that cannot');
-console.log('    separate them is measuring deletion rather than safety.\n');
+console.log('  • No exec: corpus outputs had no executable nodes/attributes after two parses.');
+console.log('  • Exact text: reader-visible output exactly matched each benign fixture.');
+console.log('  • Raw body: script/style/iframe/svg/template bodies were removed exactly.');
+console.log('  • encode-as-text rows display original markup; they do not strip it.');
+console.log('  • Throughput is the median of 7 samples after warm-up; p95 is the');
+console.log('    slowest sample in this small local run. Compare only within a category.');
+console.log('');
+
+console.log('Synthetic metric controls (not packages or rivals):');
+for (const control of [
+  { name: 'delete-all', fn: () => '' },
+  { name: 'identity', fn: (value) => value },
+]) {
+  const security = evaluateSecurity(control.fn);
+  const fidelity = evaluateFidelity(control.fn);
+  const rawTextPct = evaluateRawTextRemoval(control.fn);
+  console.log(`  • ${control.name}: no-exec ${security.pct.toFixed(1)}%, exact-text ${fidelity.textPct.toFixed(1)}%, raw-body ${rawTextPct.toFixed(1)}%`);
+}
+console.log('  These controls show why executable-output results require fidelity metrics.\n');
 
 for (const r of results) {
-  if (r.category === 'calibration') continue;
   if (r.security.failures.length) {
     console.log(`❌ ${r.name} — ${r.security.failures.length} vector(s) still executable:`);
     for (const f of r.security.failures.slice(0, 5)) {
@@ -242,6 +359,6 @@ for (const r of results) {
   }
 }
 
-const purifai = results.find((r) => r.name === 'Purifai');
+const purifai = results.find((r) => r.name === 'Purifai.sanitize');
 console.log('');
 process.exit(purifai && purifai.security.failures.length === 0 ? 0 : 1);

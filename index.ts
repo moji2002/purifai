@@ -1,61 +1,28 @@
 /**
- * 🛡️ PURIFAI - Ultra-Secure HTML Sanitizer
+ * PURIFAI - bounded strip-to-text sanitizer and contextual encoders.
  *
- * Advanced XSS protection with polyglot attack resistance.
- * Blocks sophisticated obfuscation techniques that bypass other sanitizers.
+ * `sanitize()` removes markup; it does not preserve safe HTML. Use `escape()`,
+ * `escapeAttribute()`, or `escapeUrl()` when the destination context is known.
  *
- * @version 2.0.0
+ * @version 2.0.3
  * @license MIT
  */
 
-// Core security patterns for comprehensive XSS protection
-const DANGEROUS_TAGS_WITH_CONTENT = /<(script|style|iframe|frame|object|embed|applet|meta|link|form|svg|math|base)(?:\s[^>]*)?>[\s\S]*?<\/\1>|<(script|style|iframe|frame|object|embed|applet|meta|link|form|svg|math|base)(?:\s[^>]*)?\/?>|<\/(script|style|iframe|frame|object|embed|applet|meta|link|form|svg|math|base)>/gi;
-
-// Enhanced event handlers to catch spaced and obfuscated variations
-const EVENT_HANDLERS_ENHANCED = /\s*o\s*n\s*[a-z]+\s*=\s*["']?[^"'>]+["']?/gi;
-
-// Enhanced protocol detection for javascript: variations and polyglots
-const DANGEROUS_PROTOCOLS_ENHANCED = /(?:href|src|action|formaction|data|background|poster|code|cite|longdesc|usemap|itemtype|ping|manifest|archive|classid|codebase|datasrc|dynsrc|lowsrc|srcset)\s*=\s*["']?\s*(?:j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t\s*:|javascript\s*:|vbscript\s*:|data:text\/html|data:image\/svg\+xml(?:[^"'>]*script)?|filesystem:|chrome-extension:|blob:|about:|res:|ie:|ms-its:|mk:|mhtml:|file:|jar:|hcp:|ms-help:|disk:|vnd\.ms-|shell:|lynxcgi:|lynxexec:|news:|nntp:|telnet:|gopher:|wais:|prospero:|webcal:|ldap:|ldaps:|ftp:|ftps:|sftp:|ssh:|ircs?:|mailto:|xmpp:|sms:|smsto:|mms:|mmsto:|tel:|fax:|modem:|payto:|bitcoin:|ethereum:|magnet:)[^"'\s>]*/gi;
-
-const DANGEROUS_ATTRIBUTES = /(?:expression|@import|javascript:|vbscript:|livescript:|mocha:|behavior:|constructor)\s*\(/gi;
-
-const TEMPLATE_INJECTION = /\{\{[\s\S]*?\}\}|<%[\s\S]*?%>|<\?[\s\S]*?\?>|\${[\s\S]*?}|#\{[\s\S]*?}/g;
-
-const DANGEROUS_FUNCTIONS = /\b(?:alert|eval|expression|Function|constructor|prototype|__proto__|document\.write|document\.writeln|window\.location|document\.location|setTimeout|setInterval|setImmediate|execScript|msSetImmediate|range\.createContextualFragment|range\.insertNode|insertAdjacentHTML|outerHTML)\s*\(/gi;
-
 const NULL_CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g;
+const HAS_CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/;
+const ENCODED_SYNTAX = /%3[ce]|\\u[0-9a-f]{4}|\\x[0-9a-f]{2}|&#(?:\d+|x[0-9a-f]+);/i;
+const DANGEROUS_CONTAINER_PATTERN = /<\s*\/?\s*(?:script|style|iframe|object|applet|svg|math|form|template|noscript|noframes|xmp|plaintext|head|title|textarea|frameset)\b/i;
+const EVENT_HANDLER_PATTERN = /\bo\s*n\s*(?:abort|afterprint|animationend|animationiteration|animationstart|beforeinput|beforeprint|beforeunload|begin|blur|canplay|change|click|close|contextmenu|copy|cut|dblclick|drag|drop|durationchange|ended|error|focus|focusin|focusout|hashchange|input|invalid|keydown|keypress|keyup|load|loadeddata|loadedmetadata|loadstart|message|mousedown|mouseenter|mouseleave|mousemove|mouseout|mouseover|mouseup|offline|online|open|pagehide|pageshow|paste|pause|play|playing|popstate|progress|ratechange|reset|resize|scroll|search|seeked|seeking|select|show|stalled|start|storage|submit|suspend|timeupdate|toggle|touchcancel|touchend|touchmove|touchstart|transitionend|unload|volumechange|waiting|wheel)\s*=/i;
+const DANGEROUS_PROTOCOL_PATTERN = /(?:j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t|v\s*b\s*s\s*c\s*r\s*i\s*p\s*t|l\s*i\s*v\s*e\s*s\s*c\s*r\s*i\s*p\s*t|m\s*o\s*c\s*h\s*a)\s*:|data\s*:\s*(?:text\/html|image\/svg\+xml)/i;
+const DANGEROUS_CODE_PATTERN = /(?:\b(?:eval|expression|Function|constructor|document\.write|insertAdjacentHTML)\s*\(|@import\b|\{\{|<%|<\?|\${|#\{)/i;
 
-// Specific polyglot attack patterns
-const POLYGLOT_JAVASCRIPT = /j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t\s*:/gi;
-const POLYGLOT_EVENTS = /o\s*n\s*[a-z]+\s*(?:=|alert)/gi;
-const ENCODED_TAGS = /\\x3c|\\x3e|%3c|%3e/gi;
+const DROP_BODY_TAGS = new Set([
+  'applet', 'form', 'frameset', 'head', 'iframe', 'math', 'noframes',
+  'noscript', 'object', 'plaintext', 'script', 'style', 'svg', 'template',
+  'textarea', 'title', 'xmp',
+]);
 
-const SUSPICIOUS_PATTERNS = /<|>|javascript:|vbscript:|\bon[a-z]+\s*=|@import|\{\{|<%|<\?|\${|#\{/i;
-
-/**
- * A script-executing protocol appearing on its own, with no `href=`/`src=` in
- * front of it.
- *
- * DANGEROUS_PROTOCOLS_ENHANCED only matches protocols already attached to an
- * attribute, so a bare payload like `vbscript:alert(1)` was classified as
- * harmless. That is unsafe the moment a caller drops the result into an href.
- * Letter-spacing is tolerated the same way the polyglot patterns do it.
- */
-const DANGEROUS_PROTOCOL_TOKEN = /(?:j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t|v\s*b\s*s\s*c\s*r\s*i\s*p\s*t|l\s*i\s*v\s*e\s*s\s*c\s*r\s*i\s*p\s*t|m\s*o\s*c\s*h\s*a)\s*:|data\s*:\s*text\/html/i;
-
-/**
- * A payload that survived sanitization but carries no letters or digits is pure
- * syntax residue — comment soup, stray brackets, quotes. Used to decide whether
- * anything meaningful is left of a flagged attack.
- */
-const HAS_TEXT_CONTENT = /[a-z0-9]/i;
-
-/**
- * A recognizable HTML tag: `<` immediately followed by a letter (or `/` then a
- * letter). Deliberately narrower than `/<[^>]*>/` — the broad form also matches
- * prose like "5 < 6 and 7 > 3", and deleting that silently destroys user text.
- */
-const HTML_TAG = /<\/?[a-zA-Z][^>]*>/g;
+const SAFE_URL_PROTOCOLS = new Set(['http', 'https', 'mailto']);
 
 /**
  * Escape markup delimiters left in otherwise-benign text.
@@ -69,34 +36,14 @@ function escapeAngleBrackets(str: string): string {
 }
 
 /**
- * Build a stateless twin of a pattern for use with `.test()`.
- *
- * `RegExp.prototype.test()` on a /g (or /y) regex advances `lastIndex` and does
- * NOT reset it between calls, so testing the same string repeatedly alternates
- * between match and miss. Detection must never use the /g originals — those are
- * reserved for `.replace()`, which does reset `lastIndex`.
- */
-function stateless(pattern: RegExp): RegExp {
-  return new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, ''));
-}
-
-const DETECT_DANGEROUS_TAGS = stateless(DANGEROUS_TAGS_WITH_CONTENT);
-const DETECT_EVENT_HANDLERS = stateless(EVENT_HANDLERS_ENHANCED);
-const DETECT_DANGEROUS_PROTOCOLS = stateless(DANGEROUS_PROTOCOLS_ENHANCED);
-const DETECT_DANGEROUS_ATTRIBUTES = stateless(DANGEROUS_ATTRIBUTES);
-const DETECT_TEMPLATE_INJECTION = stateless(TEMPLATE_INJECTION);
-const DETECT_POLYGLOT_JAVASCRIPT = stateless(POLYGLOT_JAVASCRIPT);
-const DETECT_POLYGLOT_EVENTS = stateless(POLYGLOT_EVENTS);
-
-/**
  * Purifai Configuration Options
  */
 export interface PurifaiOptions {
   /** Maximum input length (default: 1MB) */
   maxLength?: number;
-  /** Custom allowed protocols (default: ['http', 'https', 'mailto']) */
+  /** Subset of the built-in safe URL protocols (default: http, https, mailto) */
   allowedProtocols?: string[];
-  /** Enable aggressive mode for maximum security (default: true) */
+  /** @deprecated Retained for source compatibility; strip-to-text is always used. */
   aggressiveMode?: boolean;
 }
 
@@ -106,7 +53,7 @@ export interface PurifaiOptions {
 export interface PurifaiResult {
   /** Sanitized content */
   content: string;
-  /** Whether dangerous content was detected */
+  /** Advisory: whether a known dangerous pattern was detected */
   hadThreats: boolean;
   /** Processing time in milliseconds */
   processingTime: number;
@@ -128,112 +75,224 @@ const DEFAULT_OPTIONS: Required<PurifaiOptions> = {
   aggressiveMode: true
 };
 
-const VERSION = '2.0.0';
+const VERSION = '2.0.3';
 
-/**
- * Upper bound on filter re-passes. Each pass can only shrink the string, so a
- * fixpoint is normally reached in one or two; the cap exists so pathological
- * input cannot turn sanitization into a long loop.
- */
-const MAX_FILTER_PASSES = 5;
+function isDisallowedScalar(codePoint: number): boolean {
+  return !Number.isInteger(codePoint) ||
+    codePoint <= 0 ||
+    codePoint > 0x10ffff ||
+    (codePoint >= 0xd800 && codePoint <= 0xdfff) ||
+    (codePoint < 0x20 && codePoint !== 0x09 && codePoint !== 0x0a && codePoint !== 0x0d) ||
+    (codePoint >= 0x7f && codePoint <= 0x9f);
+}
 
-/**
- * Decode common encoding bypasses.
- *
- * Each step is guarded independently: `decodeURIComponent` throws on a stray
- * `%` (e.g. "100% off"), and a single shared try/catch would silently skip
- * every decoder after it.
- */
+function scalarFromDigits(digits: string, radix: number): string {
+  const codePoint = Number.parseInt(digits, radix);
+  return isDisallowedScalar(codePoint) ? '\ufffd' : String.fromCodePoint(codePoint);
+}
+
+/** Decode only syntax-relevant encodings, leaving prose such as `100%20off`. */
 function decodeEncodingBypasses(str: string): string {
-  let result = str;
+  return str
+    .replace(/%3c/gi, '<')
+    .replace(/%3e/gi, '>')
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) => scalarFromDigits(hex, 16))
+    .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex: string) => scalarFromDigits(hex, 16))
+    .replace(/&#(\d+);/g, (_, digits: string) => scalarFromDigits(digits, 10))
+    .replace(/&#x([0-9a-fA-F]+);/gi, (_, digits: string) => scalarFromDigits(digits, 16));
+}
 
-  // URL decode (handle %3C, %3E, etc.)
-  try {
-    result = decodeURIComponent(result);
-  } catch {
-    // Malformed percent-encoding: keep the string as-is and continue decoding.
+function isAsciiLetter(char: string | undefined): boolean {
+  if (!char) return false;
+  const code = char.charCodeAt(0);
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+function isAsciiWhitespace(char: string | undefined): boolean {
+  return char === ' ' || char === '\t' || char === '\n' || char === '\r' || char === '\f';
+}
+
+function isTagNameChar(char: string | undefined): boolean {
+  if (!char) return false;
+  const code = char.charCodeAt(0);
+  return isAsciiLetter(char) ||
+    (code >= 48 && code <= 57) ||
+    char === ':' ||
+    char === '-';
+}
+
+interface ParsedTag {
+  closing: boolean;
+  end: number;
+  name: string;
+  selfClosing: boolean;
+}
+
+const INCOMPLETE_TAG = Symbol('incomplete-tag');
+
+/** Parse one complete HTML-like tag. An incomplete candidate is treated as text. */
+function parseTag(input: string, start: number): ParsedTag | typeof INCOMPLETE_TAG | null {
+  if (input[start] !== '<') return null;
+
+  let cursor = start + 1;
+  let closing = false;
+  if (input[cursor] === '/') {
+    closing = true;
+    cursor++;
+    while (isAsciiWhitespace(input[cursor])) cursor++;
   }
 
-  try {
-    // Decode Unicode escapes (<, >, etc.)
-    result = result.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => {
-      return String.fromCharCode(parseInt(hex, 16));
-    });
+  if (!isAsciiLetter(input[cursor])) return null;
+  const nameStart = cursor;
+  while (isTagNameChar(input[cursor])) cursor++;
+  const name = input.slice(nameStart, cursor).toLowerCase();
 
-    // Decode hex escapes (\x3c, \x3e, etc.)
-    result = result.replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => {
-      return String.fromCharCode(parseInt(hex, 16));
-    });
+  const boundary = input[cursor];
+  if (boundary === undefined) return INCOMPLETE_TAG;
+  if (boundary !== '>' && boundary !== '/' && !isAsciiWhitespace(boundary)) return null;
 
-    // HTML entity decode (&#60;, &#62;, etc.)
-    result = result.replace(/&#(\d+);/g, (_, num) => {
-      return String.fromCharCode(parseInt(num, 10));
-    });
-
-    // Hex HTML entities (&#x3c;, &#x3e;, etc.)
-    result = result.replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
-      return String.fromCharCode(parseInt(hex, 16));
-    });
-  } catch {
-    // If decoding fails, use whatever decoded successfully so far.
+  // Preserve code-like comparisons such as `a<b && c>d`: `&` cannot start a
+  // normal attribute in the contract this scanner recognizes.
+  if (isAsciiWhitespace(boundary)) {
+    let next = cursor;
+    while (isAsciiWhitespace(input[next])) next++;
+    if (input[next] === '&') return null;
   }
 
-  return result;
+  let quote = '';
+  let selfClosing = false;
+  for (; cursor < input.length; cursor++) {
+    const char = input[cursor];
+    if (quote) {
+      if (char === quote) quote = '';
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === '>') {
+      let before = cursor - 1;
+      while (before > start && isAsciiWhitespace(input[before])) before--;
+      selfClosing = input[before] === '/';
+      return { closing, end: cursor + 1, name, selfClosing };
+    }
+  }
+
+  return INCOMPLETE_TAG;
+}
+
+function skipCommentOrDeclaration(input: string, start: number): number | null {
+  if (input.startsWith('<!--', start)) {
+    const end = input.indexOf('-->', start + 4);
+    return end === -1 ? input.length : end + 3;
+  }
+  if (input.startsWith('<!', start) || input.startsWith('<?', start)) {
+    const end = input.indexOf('>', start + 2);
+    return end === -1 ? input.length : end + 1;
+  }
+  return null;
 }
 
 /**
- * Remove dangerous tags together with their content.
- *
- * MUST run before any generic tag stripping. Generic stripping removes only the
- * angle-bracket delimiters, which orphans the tag body and lets script text
- * survive into the output — that is how `<script>alert(1)</script>Hello` used
- * to sanitize to "1)Hello" instead of "Hello".
+ * Skip a scriptable/raw-text container without rescanning its prefix. Nested
+ * same-name tags are counted so malformed input fails closed.
  */
-function removeDangerousTagsWithContent(str: string): string {
-  return str.replace(DANGEROUS_TAGS_WITH_CONTENT, '');
-}
+function skipContainerBody(input: string, cursor: number, containerName: string): number {
+  let depth = 1;
+  while (cursor < input.length) {
+    const nextOpen = input.indexOf('<', cursor);
+    if (nextOpen === -1) return input.length;
 
-/**
- * Enhanced polyglot attack handling - Addresses sophisticated XSS techniques
- */
-function handlePolyglotAttacks(str: string): string {
-  let result = str;
-
-  try {
-    // Fix 1: Universal XSS Polyglot - Handle spaced javascript: and event handlers
-    result = result.replace(POLYGLOT_JAVASCRIPT, ''); // Remove j a v a s c r i p t :
-    result = result.replace(POLYGLOT_EVENTS, ''); // Remove o n c l i c k =
-    result = result.replace(ENCODED_TAGS, ''); // Remove \x3c \x3e
-
-    // Fix 2: Ultimate XSS Polyglot - Handle comment obfuscation
-    result = result.replace(/javascript\s*:\s*\/\*[\s\S]*?\*\//gi, '');
-    result = result.replace(/javascript\s*:\s*\/\*[^*]*\*\/[^>]*/gi, '');
-
-    // Fix 3: Namespace Confusion Attack - Handle form/math mixing
-    result = result.replace(/<form[^>]*>[\s\S]*?<\/form>/gi, '');
-    result = result.replace(/<math[^>]*>[\s\S]*?<\/math>/gi, '');
-
-    // Additional polyglot cleanup
-    result = result.replace(/%0[AD]/gi, ''); // Remove URL encoded newlines
-
-    // Aggressive SVG cleanup if it contains suspicious patterns.
-    // NOTE: `\x3c` in a regex literal is the character `<`, so this branch fires
-    // for any markup at all. That is intentional here — it runs *after*
-    // removeDangerousTagsWithContent, so there is no tag body left to orphan.
-    if (/svg|sVg|\x3c|\\\w{3}/i.test(result)) {
-      result = result.replace(/svg[^>]*>/gi, '');
-      result = result.replace(/sVg[^>]*>/gi, '');
-      result = result.replace(/\\x\w{2}/gi, '');
-      result = result.replace(/<\/[^>]*>/gi, '');
-      result = result.replace(/<[^>]*>/gi, '');
+    const specialEnd = skipCommentOrDeclaration(input, nextOpen);
+    if (specialEnd !== null) {
+      cursor = specialEnd;
+      continue;
     }
 
-  } catch {
-    // If polyglot handling fails, strip aggressively
-    result = result.replace(/<[^>]*>/g, '').replace(/[<>]/g, '');
+    const tag = parseTag(input, nextOpen);
+    if (tag === INCOMPLETE_TAG) return input.length;
+    if (!tag) {
+      cursor = nextOpen + 1;
+      continue;
+    }
+    cursor = tag.end;
+    if (tag.name !== containerName) continue;
+    if (tag.closing) {
+      depth--;
+      if (depth === 0) return cursor;
+    } else if (!tag.selfClosing) {
+      depth++;
+    }
+  }
+  return input.length;
+}
+
+/**
+ * Strip markup in one forward pass. Each source position is consumed once;
+ * incomplete tag-like text terminates scanning as escaped prose instead of
+ * triggering repeated end-of-string searches.
+ */
+function stripToText(input: string): string {
+  const output: string[] = [];
+  let textStart = 0;
+  let cursor = 0;
+
+  while (cursor < input.length) {
+    const nextOpen = input.indexOf('<', cursor);
+    if (nextOpen === -1) break;
+
+    const specialEnd = skipCommentOrDeclaration(input, nextOpen);
+    if (specialEnd !== null) {
+      output.push(input.slice(textStart, nextOpen));
+      cursor = specialEnd;
+      textStart = cursor;
+      continue;
+    }
+
+    const tag = parseTag(input, nextOpen);
+    if (tag === INCOMPLETE_TAG) {
+      output.push(input.slice(textStart));
+      textStart = input.length;
+      cursor = input.length;
+      break;
+    }
+    if (!tag) {
+      cursor = nextOpen + 1;
+      continue;
+    }
+
+    output.push(input.slice(textStart, nextOpen));
+    cursor = tag.end;
+    if (!tag.closing && !tag.selfClosing && DROP_BODY_TAGS.has(tag.name)) {
+      cursor = skipContainerBody(input, cursor, tag.name);
+    }
+    textStart = cursor;
   }
 
-  return result;
+  if (textStart < input.length) output.push(input.slice(textStart));
+  const text = output.join('').replace(/\s+/g, ' ').trim();
+  return text.includes('<') || text.includes('>') ? escapeAngleBrackets(text) : text;
+}
+
+function coerceInput(input: unknown): string {
+  if (input === null || input === undefined) return '';
+  try {
+    if (typeof input === 'string') return input;
+    if (typeof input === 'object') {
+      const serialized = JSON.stringify(input);
+      return typeof serialized === 'string' ? serialized : '';
+    }
+    return String(input);
+  } catch {
+    return '';
+  }
+}
+
+function resolveMaxLength(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : DEFAULT_OPTIONS.maxLength;
 }
 
 /**
@@ -242,26 +301,15 @@ function handlePolyglotAttacks(str: string): string {
 function assessThreatLevel(input: string): 'none' | 'low' | 'medium' | 'high' | 'critical' {
   if (!input) return 'none';
 
-  // Critical threats
-  if (/<script/i.test(input) || /javascript\s*:/i.test(input) || /\bon[a-z]+\s*=/i.test(input)) {
+  if (/<\s*\/?\s*script\b/i.test(input) || DANGEROUS_PROTOCOL_PATTERN.test(input) || EVENT_HANDLER_PATTERN.test(input)) {
     return 'critical';
   }
-
-  // High threats
-  if (/<(iframe|object|embed|form|svg|math)/i.test(input) || /eval\s*\(/i.test(input)) {
+  if (DANGEROUS_CONTAINER_PATTERN.test(input) || /\beval\s*\(/i.test(input)) {
     return 'high';
   }
-
-  // Medium threats
-  if (/<(style|link|meta)/i.test(input) || /expression\s*\(/i.test(input)) {
+  if (DANGEROUS_CODE_PATTERN.test(input) || /<\s*(?:link|meta|base)\b/i.test(input)) {
     return 'medium';
   }
-
-  // Low threats
-  if (/<[^>]*>/i.test(input)) {
-    return 'low';
-  }
-
   return 'none';
 }
 
@@ -270,167 +318,36 @@ function assessThreatLevel(input: string): 'none' | 'low' | 'medium' | 'high' | 
  */
 function isDangerous(input: string): boolean {
   if (!input) return false;
-  try {
-    // Stateless twins only — see `stateless()`.
-    return DETECT_DANGEROUS_TAGS.test(input) ||
-           DETECT_EVENT_HANDLERS.test(input) ||
-           DETECT_DANGEROUS_PROTOCOLS.test(input) ||
-           DETECT_DANGEROUS_ATTRIBUTES.test(input) ||
-           DETECT_TEMPLATE_INJECTION.test(input) ||
-           DETECT_POLYGLOT_JAVASCRIPT.test(input) ||
-           DETECT_POLYGLOT_EVENTS.test(input) ||
-           DANGEROUS_PROTOCOL_TOKEN.test(input);
-  } catch {
-    return true; // If error occurs, assume dangerous
-  }
+  return DANGEROUS_CONTAINER_PATTERN.test(input) ||
+    EVENT_HANDLER_PATTERN.test(input) ||
+    DANGEROUS_PROTOCOL_PATTERN.test(input) ||
+    DANGEROUS_CODE_PATTERN.test(input);
 }
 
 /**
- * Sanitize input with maximum security protection
+ * Convert HTML-like input to inert plain text using a bounded forward scanner.
  */
 function sanitize(input: unknown, options?: PurifaiOptions): string {
   const config = { ...DEFAULT_OPTIONS, ...options };
+  let str = coerceInput(input);
+  const maxLength = resolveMaxLength(config.maxLength);
+  if (str.length > maxLength) str = str.slice(0, maxLength);
 
-  // Handle various input types with robust error handling
-  if (input === null || input === undefined) return '';
+  if (!str) return '';
 
-  let str: string;
-  try {
-    if (typeof input === 'string') {
-      str = input;
-    } else if (typeof input === 'object') {
-      str = JSON.stringify(input);
-    } else {
-      str = String(input);
-    }
-  } catch {
-    return '';
+  // Most calls are already plain text. Avoid six decoding passes and the tag
+  // scanner when no raw/encoded delimiter or control character is present.
+  if (!str.includes('<') && !str.includes('>') &&
+      !HAS_CONTROL_CHARS.test(str) && !ENCODED_SYNTAX.test(str)) {
+    return str.replace(/\s+/g, ' ').trim();
   }
 
-  // Length check
-  if (str.length > config.maxLength) {
-    str = str.substring(0, config.maxLength);
-  }
-
-  // Quick return for empty
-  if (!str.trim()) return '';
-
-  // Remove null bytes and control characters first
-  let result = str.replace(NULL_CONTROL_CHARS, '');
-
   try {
-    // Decode common encoding bypasses first
-    result = decodeEncodingBypasses(result);
-
-    // Classify once, against both the raw and the decoded form — decoding can
-    // reveal an attack that was invisible in the original input.
-    const dangerous = isDangerous(str) || isDangerous(result);
-
-    if (!dangerous) {
-      // Nothing dangerous was detected. Remove real markup, but ESCAPE any
-      // leftover angle brackets instead of deleting them: in benign text they
-      // are prose ("5 < 6"), and deleting through to the next `>` silently
-      // swallows whatever the user actually wrote.
-      const benign = removeDangerousTagsWithContent(result)
-        .replace(HTML_TAG, '')
-        .replace(DANGEROUS_ATTRIBUTES, '')
-        .replace(TEMPLATE_INJECTION, '')
-        .replace(DANGEROUS_FUNCTIONS, '');
-
-      return escapeAngleBrackets(benign).replace(/\s+/g, ' ').trim();
-    }
-
-    // Remove dangerous tags together with their content BEFORE any generic tag
-    // stripping, so tag bodies can never be orphaned into the output.
-    result = removeDangerousTagsWithContent(result);
-
-    // Enhanced polyglot attack mitigation
-    result = handlePolyglotAttacks(result);
-
-    // Apply core security filters to a FIXPOINT.
-    //
-    // Deleting a match can splice previously separated text into a brand-new
-    // match: removing "(1)" from "confirm(1)href=..." leaves "confirm1href=",
-    // whose tail "onfirm1href=" reads as an event handler on the next pass.
-    // A single pass therefore leaves output that is not stable under a second
-    // sanitize(), which both breaks idempotence and — more seriously — means
-    // removal can manufacture a construct that was not in the input.
-    // Iterating until nothing changes closes that gap. Found by fuzzing.
-    let previous: string;
-    let passes = 0;
-    do {
-      previous = result;
-      result = result
-        // Re-run tag+content removal: decoding and polyglot handling can reveal
-        // markup that was not visible in the original input.
-        .replace(DANGEROUS_TAGS_WITH_CONTENT, '')
-        // Enhanced event handlers (catches obfuscated variations)
-        .replace(EVENT_HANDLERS_ENHANCED, '')
-        // Enhanced protocol detection (catches polyglot protocols)
-        .replace(DANGEROUS_PROTOCOLS_ENHANCED, (match) => {
-          // Keep safe protocols only
-          const safeProtocols = config.allowedProtocols.join('|');
-          return match.match(new RegExp(`^(?:href|src)\\s*=\\s*["']?\\s*(?:${safeProtocols}):\\/\\/`, 'i')) ? match : '';
-        })
-        // Remove dangerous attributes
-        .replace(DANGEROUS_ATTRIBUTES, '')
-        // Remove template injection patterns
-        .replace(TEMPLATE_INJECTION, '')
-        // Remove dangerous function calls
-        .replace(DANGEROUS_FUNCTIONS, '');
-      passes++;
-    } while (result !== previous && passes < MAX_FILTER_PASSES);
-
-    // Final safety check with aggressive cleanup if needed
-    if (config.aggressiveMode && SUSPICIOUS_PATTERNS.test(result)) {
-      const tempCheck = result.replace(/<[^>]*>/g, '');
-      if (SUSPICIOUS_PATTERNS.test(tempCheck)) {
-        // Still dangerous after tag removal, apply maximum security
-        result = result
-          .replace(/<[^>]*>/g, '') // Remove all HTML tags
-          .replace(/[<>]/g, '') // Remove angle brackets
-          .replace(/javascript|vbscript/gi, '') // Remove dangerous protocols
-          // The \b is load-bearing. Without it `on\w+=` matched the "on" inside
-          // "c-on-firm1href=" — a string produced by this pipeline's own earlier
-          // deletions — and ate text that was never a handler, which also broke
-          // idempotence. Every real handler is preceded by a separator.
-          .replace(/\bon[a-z]+\s*=/gi, '') // Remove event handlers
-          .replace(/svg|SVG|sVg/gi, '') // Remove svg references
-          .replace(/script|SCRIPT/gi, '') // Remove script references
-          .replace(/alert|eval/gi, '') // Remove dangerous functions
-          .replace(/\\x\w{2}/gi, '') // Remove hex encoded chars
-          .replace(/[(){}[\]]/g, ''); // Remove brackets that could be function calls
-      }
-    }
-
-    // Clean up whitespace
-    result = result.replace(/\s+/g, ' ').trim();
-
-    // Reaching here means the input WAS flagged dangerous. If its remains
-    // contain no letters or digits, what survived is pure syntax residue
-    // (unbalanced `/*`, quotes, stray brackets left by polyglots) — emit
-    // nothing rather than punctuation soup.
-    //
-    // Deliberately a *decision*, not another substitution: stripping comment
-    // tokens outright would corrupt legitimate text such as "https://…".
-    if (config.aggressiveMode && !HAS_TEXT_CONTENT.test(result)) {
-      return '';
-    }
-
-    // With aggressiveMode off, nothing above neutralises delimiter fragments the
-    // tag patterns cannot match — `<!-->` leaves `-->`, and an attribute
-    // breakout leaves `">`. Escaping them keeps the output inert without
-    // deleting anything, so no configuration can emit a raw `<` or `>`.
-    return escapeAngleBrackets(result);
-
+    const decoded = decodeEncodingBypasses(str.replace(NULL_CONTROL_CHARS, ''))
+      .replace(NULL_CONTROL_CHARS, '');
+    return stripToText(decoded);
   } catch {
-    // Fallback to maximum security sanitization if any error occurs
-    return str
-      .replace(NULL_CONTROL_CHARS, '')
-      .replace(/<[^>]*>/g, '')
-      .replace(/[<>]/g, '')
-      .replace(/javascript|vbscript|eval|alert/gi, '')
-      .replace(/\bon[a-z]+\s*=/gi, '')
+    return escapeAngleBrackets(str.replace(NULL_CONTROL_CHARS, ''))
       .replace(/\s+/g, ' ')
       .trim();
   }
@@ -441,13 +358,14 @@ function sanitize(input: unknown, options?: PurifaiOptions): string {
  */
 function analyze(input: unknown, options?: PurifaiOptions): PurifaiResult {
   const startTime = performance.now();
-  const originalStr = String(input ?? '');
+  const config = { ...DEFAULT_OPTIONS, ...options };
+  const originalStr = coerceInput(input).slice(0, resolveMaxLength(config.maxLength));
 
-  const sanitized = sanitize(input, options);
+  const sanitized = sanitize(originalStr, options);
   const processingTime = performance.now() - startTime;
-
-  const hadThreats = sanitized !== originalStr;
-  const threatLevel = assessThreatLevel(originalStr);
+  const decodedForAnalysis = decodeEncodingBypasses(originalStr.replace(NULL_CONTROL_CHARS, ''));
+  const threatLevel = assessThreatLevel(decodedForAnalysis);
+  const hadThreats = isDangerous(originalStr) || isDangerous(decodedForAnalysis);
 
   return {
     content: sanitized,
@@ -473,10 +391,8 @@ function sanitizeBatch(inputs: unknown[], options?: PurifaiOptions): string[] {
 /**
  * Escape text for insertion into an HTML body context.
  *
- * Lossless and total: nothing is removed, so this is the correct choice when
- * the input is plain text rather than markup. `sanitize()` cannot tell the two
- * apart — `a<b && c>d` is a valid HTML start tag by the parsing spec, so
- * `sanitize()` drops it while `escape()` preserves it verbatim.
+ * Lossless apart from control characters: this is the correct choice when the
+ * input is plain text rather than markup and exact text fidelity matters.
  */
 function escape(input: unknown): string {
   if (input === null || input === undefined) return '';
@@ -521,9 +437,9 @@ function escapeAttribute(input: unknown): string {
 /**
  * Escape and validate a value used as a URL.
  *
- * Returns '' when the protocol is not in `allowedProtocols`, which is what
- * stops `javascript:`, `data:` and friends from reaching an `href`. Relative
- * URLs are allowed through, since they cannot carry a protocol.
+ * Returns '' when the protocol is not in the caller-selected subset of the
+ * built-in safe protocols. Script-bearing schemes and protocol-relative URLs
+ * cannot be enabled through options.
  */
 function escapeUrl(input: unknown, options?: PurifaiOptions): string {
   if (input === null || input === undefined) return '';
@@ -534,6 +450,17 @@ function escapeUrl(input: unknown, options?: PurifaiOptions): string {
   // Strip control characters and whitespace an attacker can use to break up a
   // protocol token ("java\tscript:").
   const normalized = str.replace(/[\x00-\x20\x7F-\x9F]/g, '');
+  if (normalized.startsWith('//') || normalized.startsWith('\\\\')) return '';
+
+  const configuredProtocols = Array.isArray(config.allowedProtocols)
+    ? config.allowedProtocols
+    : [];
+  const requestedProtocols = new Set(
+    configuredProtocols
+      .filter((protocol): protocol is string => typeof protocol === 'string')
+      .map((protocol) => protocol.toLowerCase())
+      .filter((protocol) => SAFE_URL_PROTOCOLS.has(protocol)),
+  );
 
   // A protocol is only present when a colon appears before any '/', '?' or '#'.
   const colon = normalized.indexOf(':');
@@ -541,9 +468,7 @@ function escapeUrl(input: unknown, options?: PurifaiOptions): string {
     const beforeColon = normalized.slice(0, colon);
     if (!/[/?#]/.test(beforeColon)) {
       const protocol = beforeColon.toLowerCase();
-      if (!config.allowedProtocols.map((p) => p.toLowerCase()).includes(protocol)) {
-        return '';
-      }
+      if (!requestedProtocols.has(protocol)) return '';
     }
   }
 
@@ -563,16 +488,16 @@ function getVersion(): string {
 function getStats(): { version: string; securityLevel: string; performance: string } {
   return {
     version: getVersion(),
-    securityLevel: '100% XSS Protection',
-    performance: 'Optimized for high-throughput'
+    securityLevel: 'Plain-text output with contextual encoders',
+    performance: 'Measure with the included benchmark on your target runtime'
   };
 }
 
 /**
- * 🛡️ Purifai - Ultra-Secure HTML Sanitizer
+ * Purifai - bounded strip-to-text sanitizer
  *
- * Advanced lightweight HTML sanitizer with superior XSS protection
- * against known attack vectors including advanced polyglot attacks.
+ * Converts HTML-like input to plain text and exposes separate contextual
+ * encoders for HTML text, attributes, and URLs.
  *
  * Every method delegates to a module-level function and reads no instance or
  * class state, so `Purifai.sanitize` and the standalone `sanitize` export are
@@ -580,11 +505,11 @@ function getStats(): { version: string; securityLevel: string; performance: stri
  */
 export class Purifai {
   /**
-   * Sanitize input with maximum security protection
+   * Convert HTML-like input to plain text
    *
    * @param input - Content to sanitize (string, object, or any type)
    * @param options - Optional configuration
-   * @returns Sanitized string safe for HTML output
+   * @returns Plain-text string; render it through normal text interpolation
    *
    * @example
    * ```typescript

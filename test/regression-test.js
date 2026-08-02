@@ -85,6 +85,25 @@ check('script body does not leak', sanitize('<script>alert(1)</script>Hello'), '
 check('script body with quotes', sanitize('<script>alert("test")</script>Hello World'), 'Hello World');
 check('style body does not leak', sanitize('<style>body{color:red}</style>Text'), 'Text');
 check('iframe body does not leak', sanitize('<iframe>inner</iframe>After'), 'After');
+check(
+  'nested script-like containers are removed as one region',
+  sanitize('Before<script>one<script>two</script>three</script>After'),
+  'BeforeAfter',
+);
+check('mixed-case raw-text close is found', sanitize('<ScRiPt>bad</sCrIpT>Good'), 'Good');
+check(
+  'tag-like script text does not hide a later closing tag',
+  sanitize('Before<script>const link = "<a"; if (a<b && c>d) use(link);</script>After'),
+  'BeforeAfter',
+);
+check('unclosed raw-text container consumes the remainder', sanitize('Before<style>body{color:red}'), 'Before');
+check(
+  'malformed tag candidates inside raw text consume the remainder',
+  sanitize(`Before<script>${'<a '.repeat(1000)}`),
+  'Before',
+);
+check('template body does not leak', sanitize('Before<template><img src=x onerror=alert(1)></template>After'), 'BeforeAfter');
+check('textarea body does not leak', sanitize('Before<textarea></textarea><script>x</script>After'), 'BeforeAfter');
 
 // ---------------------------------------------------------------------------
 // 4. Idempotence — sanitizing twice must equal sanitizing once.
@@ -114,12 +133,26 @@ check('email survives', sanitize('Email me at a@b.com'), 'Email me at a@b.com');
 // A stray '%' used to throw inside decodeURIComponent and skip every
 // subsequent decoder; decoding steps are now independently guarded.
 check('stray % still decodes entities', sanitize('50% &#72;i'), '50% Hi');
+check('equals in prose survives', sanitize('London=Paris'), 'London=Paris');
+check('identifier with on-prefix survives', sanitize('online=true'), 'online=true');
+assert('identifier with on-prefix is not classified as an event handler', isDangerous('online=true') === false);
+check('percent-encoded prose is not URL-decoded', sanitize('Save 100%20off today'), 'Save 100%20off today');
+check('code-like comparisons survive', sanitize('a<b && c>d'), 'a&lt;b && c&gt;d');
+check('incomplete tag-like prose survives', sanitize('Use <strong when documenting syntax'), 'Use &lt;strong when documenting syntax');
+
+console.log('\n🔢 Numeric entity validation:');
+check('valid astral scalar decodes', sanitize('Smile: &#x1F600;'), 'Smile: 😀');
+check('null entity becomes replacement character', sanitize('&#0;X'), '�X');
+check('surrogate entity becomes replacement character', sanitize('&#xD800;X'), '�X');
+check('out-of-range entity becomes replacement character', sanitize('&#x110000;X'), '�X');
+check('control entity becomes replacement character', sanitize('&#1;X'), '�X');
 
 // ---------------------------------------------------------------------------
 // 6. Modern attack classes (mXSS, namespace confusion, rawtext breakout).
 //    Sources: cure53/DOMPurify attack-class wiki, PortSwigger mXSS research.
-//    Criterion: a string sanitizer's output is only unambiguously safe for HTML
-//    insertion when it carries no markup delimiters and no handlers at all.
+//    Criterion: strip-to-text output carries no raw markup delimiters. Handler
+//    and protocol words are inert text unless a caller puts them in a different
+//    context; escapeAttribute()/escapeUrl() cover those contexts.
 // ---------------------------------------------------------------------------
 console.log('\n🧬 Modern attack classes:');
 const MODERN = [
@@ -158,7 +191,7 @@ for (const [name, payload] of MODERN) {
     assert(`${name}`, false, `threw ${e.message}`);
     continue;
   }
-  const clean = !/[<>]/.test(out) && !/on[a-z]+\s*=/i.test(out) && !/javascript\s*:|vbscript\s*:/i.test(out);
+  const clean = !/[<>]/.test(out);
   assert(`${name}`, clean, `residue: ${JSON.stringify(out.slice(0, 70))}`);
 }
 
@@ -188,6 +221,10 @@ circular.self = circular;
 let circularOk = true;
 try { sanitize(circular); } catch { circularOk = false; }
 assert('circular object handled', circularOk);
+const hostileToJson = { toJSON() { throw new Error('hostile toJSON'); } };
+let hostileAnalysisOk = true;
+try { analyze(hostileToJson); } catch { hostileAnalysisOk = false; }
+assert('analyze() handles hostile object coercion', hostileAnalysisOk);
 
 // Very large input must respect maxLength without pathological slowdown.
 const big = '<script>alert(1)</script>'.repeat(20000);
@@ -215,8 +252,8 @@ assert('vbscript: flagged', isDangerous('vbscript:alert(1)') === true);
 assert('javascript: flagged', isDangerous('javascript:alert(1)') === true);
 assert('mixed-case flagged', isDangerous('JaVaScRiPt:alert(1)') === true);
 assert('https: NOT flagged', isDangerous('https://example.com') === false);
-assert('no vbscript: in output', !/vbscript\s*:/i.test(sanitize('vbscript:alert(1)')));
-assert('no javascript: in output', !/javascript\s*:/i.test(sanitize('javascript:alert(1)')));
+check('sanitize() preserves vbscript: as inert text', sanitize('vbscript:alert(1)'), 'vbscript:alert(1)');
+check('sanitize() preserves javascript: as inert text', sanitize('javascript:alert(1)'), 'javascript:alert(1)');
 
 // ---------------------------------------------------------------------------
 // 10. Contextual escaping APIs.
@@ -240,6 +277,20 @@ assert('escapeUrl() allows https', escapeUrl('https://example.com').length > 0);
 assert('escapeUrl() allows mailto', escapeUrl('mailto:a@b.com').length > 0);
 assert('escapeUrl() allows relative', escapeUrl('/relative/path').length > 0);
 assert('escapeUrl() honours allowedProtocols', escapeUrl('mailto:a@b.com', { allowedProtocols: ['https'] }) === '');
+check('escapeUrl() blocks protocol-relative URLs', escapeUrl('//evil.example/path'), '');
+check('escapeUrl() blocks backslash protocol-relative URLs', escapeUrl('\\\\evil.example\\path'), '');
+check(
+  'escapeUrl() cannot enable javascript through options',
+  escapeUrl('javascript:alert(1)', { allowedProtocols: ['javascript'] }),
+  '',
+);
+check('escapeUrl() fails closed on an invalid protocol option', escapeUrl('https://example.com', { allowedProtocols: null }), '');
+
+console.log('\n🧭 Analysis is advisory:');
+const benignMarkupAnalysis = analyze('<b>Hello</b>');
+check('ordinary markup transformation is not reported as a threat', benignMarkupAnalysis.hadThreats, false);
+check('ordinary markup has no threat level', benignMarkupAnalysis.threatLevel, 'none');
+assert('getStats() makes no protection-percentage claim', !/\d+%|guarantee|bulletproof/i.test(JSON.stringify(Purifai.getStats())));
 
 // Escaped output must be inert: no markup delimiters survive any escaper.
 for (const [name, fn] of [['escape', escape], ['escapeAttribute', escapeAttribute]]) {
