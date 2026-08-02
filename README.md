@@ -3,15 +3,16 @@
 
 # Purifai
 
-[npm](https://www.npmjs.com/package/purifai) ·
-[Project notes](https://worksonmy.dev/projects/purifai) ·
-[Runnable examples](https://github.com/moji2002/purifai/tree/main/examples) ·
-[Issues](https://github.com/moji2002/purifai/issues)
+[![npm version](https://img.shields.io/npm/v/purifai.svg)](https://www.npmjs.com/package/purifai)
+[![CI](https://github.com/moji2002/purifai/actions/workflows/ci.yml/badge.svg)](https://github.com/moji2002/purifai/actions/workflows/ci.yml)
+[![gzip: 23.7 KiB](https://img.shields.io/badge/gzip-23.7_KiB-2f855a)](docs/benchmarks/v3.md)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Purifai is a fixed-policy HTML-to-readable-text converter for servers, browsers,
-and edge runtimes. It incrementally removes non-reader bodies, decodes the full
-WHATWG character-reference set, and preserves useful structure such as headings,
-paragraphs, lists, links, image alternatives, code, and simple tables.
+**Readable text from hostile HTML—without a DOM.**
+
+Purifai is a fixed-policy HTML-to-text converter for servers, browsers, and
+edge runtimes. It keeps useful document structure, drops non-reader bodies, and
+enforces input, output, nesting, and retained-token limits while scanning.
 
 ```ts
 import { toText } from 'purifai';
@@ -19,6 +20,8 @@ import { toText } from 'purifai';
 const text = toText(
   '<script>alert(1)</script><h2>Release</h2><ul><li>Fast</li></ul>',
 );
+
+console.log(text);
 // Release
 //
 // - Fast
@@ -27,32 +30,16 @@ const text = toText(
 A flat tag remover can leak `alert(1)` from the script body and collapse the
 remaining text. Purifai drops that body and formats the reader content.
 
-The output is a JavaScript string, not safe HTML. Use one of these supported
-sinks:
+## Choose Purifai when
 
-```ts
-import { escapeHtmlText, toText } from 'purifai';
+- HTML may be large, malformed, or hostile.
+- You want readable plain text—not preserved markup or a browser DOM.
+- Conversion must have deterministic resource limits.
+- The same implementation must run in Node, Bun, Deno, Workers, and browsers.
+- Streaming should produce the same result regardless of chunk boundaries.
 
-element.textContent = toText(untrustedHtml);
-element.innerHTML = escapeHtmlText(toText(untrustedHtml));
-```
-
-Prefer `textContent`. `escapeHtmlText` exists for an HTML text context only; it
-does not make a value safe for an attribute, URL, JavaScript, CSS, or template
-source.
-
-## Why it exists
-
-Purifai targets one narrow intersection:
-
-- readable extraction instead of flat deletion;
-- deterministic input, output, nesting, and retained-token limits;
-- chunk-invariant Web `TransformStream` conversion;
-- no DOM, tree, Node built-in, or runtime dependency; and
-- one side-effect-free artifact across server, browser, and edge runtimes.
-
-It does not preserve markup and does not classify a user's intent. If either is
-your requirement, use a tool designed for that different job.
+If you need selector-driven formatting, complex table layout, or allow-listed
+safe HTML, jump to [Which tool should you choose?](#which-tool-should-you-choose).
 
 ## Install
 
@@ -60,57 +47,70 @@ your requirement, use a tool designed for that different job.
 npm install purifai
 ```
 
-Purifai v3 requires Node.js 22 or newer when used in Node.
+Purifai v3 requires Node.js 22 or newer when used in Node. It ships ESM and
+CommonJS exports and has zero runtime dependencies.
 
-## API
-
-### `toText(html, options?)`
-
-Converts one string and returns readable text. A breached limit throws a
-`PurifaiLimitError`.
+## Quick start
 
 ```ts
 import { toText } from 'purifai';
 
-const text = toText('<h1>Guide</h1><p>Start here.</p>', {
+const text = toText('<h1>Guide</h1><p>Start <strong>here</strong>.</p>', {
   layout: 'readable',
-  links: 'label-and-url',
+  links: 'label',
   images: 'alt',
-  baseUrl: 'https://docs.example/',
-  limits: { input: 1_000_000, output: 250_000, depth: 64, token: 65_536 },
 });
+
+// Guide
+//
+// Start here.
 ```
 
-### `convert(html, options?)`
+`toText` returns a JavaScript string. It does not return safe HTML.
 
-Returns the text plus a frozen conversion report. It is the only entry point
-that can deliberately return a bounded prefix instead of throwing.
+## Safe output
+
+Prefer a text sink:
 
 ```ts
-import { convert } from 'purifai';
-
-const result = convert(largeHtml, {
-  limits: { output: 20_000 },
-  overflow: 'truncate',
-});
-
-result.text;
-result.truncatedBy; // 'output' or null
-result.scanComplete; // false after truncation
-result.consumedInputCodeUnits;
-result.outputCodeUnits;
-result.droppedContainers; // e.g. { script: 2, style: 1 }
+element.textContent = toText(untrustedHtml);
 ```
 
-Truncation is explicit, deterministic, and never emits half of a UTF-16
-surrogate pair. When multiple limits meet at the same point, the first observed
-limit is reported.
+If the only available sink is an HTML text node, escape the text explicitly:
 
-### `createTextTransform(options?)`
+```ts
+import { escapeHtmlText, toText } from 'purifai';
 
-Returns a native `TransformStream<string, string>` with a `result` promise. The
-stream uses the same state machine and produces exactly the same joined text as
-`toText`, regardless of chunk boundaries.
+element.innerHTML = escapeHtmlText(toText(untrustedHtml));
+```
+
+`escapeHtmlText` is only for an HTML text context. It does not make a value safe
+for an attribute, URL, JavaScript, CSS, or template source. A displayed URL is
+also still text; moving it into `href` requires a separate URL-policy decision.
+
+## Why Purifai
+
+Most HTML-to-text tools optimize for either minimal tag removal or broad
+formatting control. Purifai targets a narrower intersection:
+
+| Requirement | Purifai behavior |
+| --- | --- |
+| Reader-friendly output | Preserves headings, paragraphs, lists, quotes, code, simple tables, links, and image alternatives |
+| Non-reader content | Drops bodies such as `script`, `style`, `template`, `iframe`, `svg`, and `math` |
+| Hostile-input bounds | Enforces input, output, depth, and aggregate retained-token limits during scanning |
+| Streaming | Uses a native Web `TransformStream` with chunk-invariant output |
+| Portability | Uses no DOM, document tree, Node built-in, or runtime dependency |
+| Predictability | Fixed policy, validated options, explicit overflow behavior, and frozen reports |
+
+That fixed scope is the reason to choose Purifai. It deliberately does not
+preserve markup, reconstruct CSS layout, expose custom formatters, or classify a
+user's intent.
+
+## Streaming
+
+`createTextTransform` converts incrementally using the same state machine as
+`toText`. Joining its output produces exactly the same text for every possible
+input chunking.
 
 ```ts
 import { createTextTransform } from 'purifai';
@@ -122,27 +122,145 @@ const transform = createTextTransform({ links: 'label-and-url' });
 const readable = response.body
   .pipeThrough(new TextDecoderStream())
   .pipeThrough(transform);
-const reader = readable.getReader();
 
-for (;;) {
-  const { done, value } = await reader.read();
-  if (done) break;
-  consumeText(value);
+for await (const chunk of readable) {
+  consumeText(chunk);
 }
 
 const report = await transform.result;
 ```
 
-Stream conversion always throws on a breached limit. Output may already have
-been enqueued when `readable` and `transform.result` reject, so discard partial
-output unless your application has deliberately defined it as useful. Purifai
-does not buffer the whole result to make an error transactional.
+Stream conversion always throws when a limit is breached. Some output may
+already have been enqueued when `readable` and `transform.result` reject, so
+discard partial output unless your application explicitly accepts it.
 
-### `escapeHtmlText(text)`
+## Bounded conversion
 
-Encodes `&`, `<`, `>`, `"`, and `'` for an HTML text node. It is lossless and is
-for plain text—including `toText` output—when the only available sink is
-`innerHTML`.
+`toText` throws a `PurifaiLimitError` when any configured limit is exceeded.
+Use `convert` only when a bounded prefix is an acceptable result:
+
+```ts
+import { convert } from 'purifai';
+
+const result = convert(largeHtml, {
+  limits: { input: 1_000_000, output: 20_000, depth: 64, token: 65_536 },
+  overflow: 'truncate',
+});
+
+result.text;
+result.truncatedBy; // 'input', 'output', 'depth', 'token', or null
+result.scanComplete; // false after truncation
+result.consumedInputCodeUnits;
+result.outputCodeUnits;
+result.droppedContainers; // e.g. { script: 2, style: 1 }
+```
+
+Truncation is explicit and deterministic, and never emits half of a UTF-16
+surrogate pair. `toText` and `createTextTransform` never truncate silently.
+
+## Options
+
+Unknown keys and invalid values throw `TypeError`; Purifai does not guess around
+configuration mistakes.
+
+| Option | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `layout` | `'readable' \| 'compact'` | `'readable'` | Structural boundaries, or normalized single-space text |
+| `links` | `'label' \| 'label-and-url' \| 'drop'` | `'label'` | Keep the label, append an accepted display URL, or drop the link body |
+| `images` | `'alt' \| 'drop'` | `'alt'` | Emit decoded non-empty `alt` text, or omit images |
+| `baseUrl` | `string \| URL` | none | Resolve relative display URLs against a credential-free HTTP(S) base |
+| `limits.input` | non-negative safe integer | `1_000_000` | Maximum input UTF-16 code units consumed |
+| `limits.output` | non-negative safe integer | `250_000` | Maximum output UTF-16 code units emitted |
+| `limits.depth` | non-negative safe integer | `64` | Maximum live structural nesting |
+| `limits.token` | non-negative safe integer | `65_536` | Maximum aggregate retained token and attribute code units |
+| `overflow` | `'throw' \| 'truncate'` | `'throw'` | `convert` only; other APIs always throw |
+
+All four limits are enforced before unbounded caller-controlled state can
+accumulate. Values measure JavaScript UTF-16 code units, not encoded bytes.
+
+### Display URL policy
+
+`label-and-url` emits destinations as display text, never as active links. It
+accepts absolute `http:`, `https:`, and `mailto:` URLs. Relative URLs require a
+validated HTTP(S) `baseUrl`. Credentials, controls, ambiguous schemes,
+protocol-relative inputs, leading backslashes, unsupported schemes, and invalid
+URLs are omitted while their visible label remains.
+
+## Extraction policy
+
+Purifai removes source and non-reader bodies including `script`, `style`,
+`template`, `iframe`, `noscript`, `noembed`, `noframes`, `svg`, and `math`. It
+preserves selected fallback and form text, decodes the complete pinned WHATWG
+character-reference set, preserves literal `xmp`, and treats `plaintext` as text
+through end of input.
+
+This is a bounded extraction grammar, not browser tree construction. It does not
+recreate CSS layout, browser `innerText`, complex `rowspan`/`colspan` tables,
+SVG/MathML semantics, selector rules, custom formatters, or browser-equivalent
+malformed-markup recovery.
+
+## Benchmarks
+
+The checked category benchmark pins `striptags@3.2.0` and
+`html-to-text@10.0.0`. It measures reviewed readability and body-removal
+fixtures, isolated warm median and p95 latency, and fresh-process peak RSS.
+
+On the recorded Apple M1 / Node 24 run, Purifai passed all 11 category gates:
+
+- 8/8 readability fixtures and all 5 non-reader-body fixtures;
+- lower hostile-input p95 than `html-to-text` on four hostile corpora; and
+- lower streaming peak RSS than `html-to-text` on all five memory corpora.
+
+`striptags` remains faster on some flat-strip cases. That is not Purifai's
+claim. Results are machine-, runtime-, and corpus-specific.
+
+See the [complete methodology, raw results, and tables](docs/benchmarks/v3.md).
+Reproduce measurements with `pnpm run bench`; check the recorded release gates
+with `pnpm run bench:check`.
+
+## Size, portability, and release proof
+
+The complete minified ESM runtime—including all 2,231 pinned WHATWG entity
+names—is 23,689 bytes with deterministic `gzip -9`. The release gate also checks
+packed exports, zero runtime dependencies, cold import time, and retained import
+heap.
+
+The same packed artifact is tested in:
+
+| Runtime | Release coverage |
+| --- | --- |
+| Node.js | 22, 24, and 26; ESM and CommonJS |
+| Bun | ESM and CommonJS |
+| Deno | ESM |
+| Cloudflare Workers | Real `workerd`, without Node compatibility |
+| Browsers | Chromium, Firefox, and WebKit |
+
+Release qualification also includes 10,000 seeded malformed-input cases,
+adversarial scaling checks, safe-sink tests with a positive control, package
+smoke tests, and npm OIDC provenance bound to the tagged GitHub source commit.
+
+## API reference
+
+### `toText(html, options?) → string`
+
+Converts one HTML string into readable text. Throws `TypeError` for invalid
+input or options and `PurifaiLimitError` for a breached limit.
+
+### `convert(html, options?) → ConversionResult`
+
+Returns text plus a frozen report containing completion, truncation, consumed
+input, output length, and dropped-container counts. It is the only API that can
+return a deliberately truncated prefix.
+
+### `createTextTransform(options?) → TextTransform`
+
+Returns a native `TransformStream<string, string>` with a `result` promise for
+the frozen conversion report. Limit failures reject both the stream and the
+promise with the same error object.
+
+### `escapeHtmlText(text) → string`
+
+Losslessly encodes `&`, `<`, `>`, `"`, and `'` for an HTML text-node context.
 
 ### `PurifaiLimitError`
 
@@ -160,109 +278,28 @@ try {
 }
 ```
 
-## Options and defaults
-
-Unknown keys and invalid values throw `TypeError`; Purifai does not silently
-guess around configuration mistakes.
-
-| Option | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `layout` | `'readable' \| 'compact'` | `'readable'` | Structural newlines/lists/tables, or normalized single-space text |
-| `links` | `'label' \| 'label-and-url' \| 'drop'` | `'label'` | Keep label, append an accepted display URL, or drop the link body |
-| `images` | `'alt' \| 'drop'` | `'alt'` | Emit decoded non-empty `alt` text, or omit images |
-| `baseUrl` | `string \| URL` | none | Resolve relative display URLs against a credential-free HTTP(S) base |
-| `limits.input` | non-negative safe integer | `1_000_000` | Maximum input UTF-16 code units consumed |
-| `limits.output` | non-negative safe integer | `250_000` | Maximum output UTF-16 code units emitted |
-| `limits.depth` | non-negative safe integer | `64` | Maximum live structural nesting |
-| `limits.token` | non-negative safe integer | `65_536` | Maximum aggregate retained token/attribute code units |
-| `overflow` | `'throw' \| 'truncate'` | `'throw'` | `convert` only; other APIs always throw |
-
-All four limits are enforced while scanning, before unbounded caller-controlled
-state can accumulate. Values measure JavaScript UTF-16 code units, not encoded
-bytes.
-
-## Link policy
-
-`label-and-url` emits a destination as display text, never as an active link. It
-accepts absolute `http:`, `https:`, and `mailto:` URLs. Relative URLs require a
-validated HTTP(S) `baseUrl`. Control characters, whitespace-split schemes,
-protocol-relative inputs, leading backslashes, credentials, unsupported schemes,
-and invalid URLs are omitted while their visible label remains.
-
-The returned URL string is still only text. Do not move it into `href` without a
-separate URL-policy decision at that sink.
-
-## Extraction fidelity
-
-Purifai intentionally removes source and non-reader bodies including `script`,
-`style`, `template`, `iframe`, `noscript`, `noembed`, `noframes`, `svg`, and
-`math`. It preserves selected fallback/form text, decodes `textarea`, preserves
-literal `xmp`, and treats `plaintext` as text through end of input.
-
-This is a bounded extraction grammar, not browser tree construction. It does not
-recreate CSS layout, browser `innerText`, complex `rowspan`/`colspan` tables,
-SVG/MathML semantics, selector rules, custom formatters, or browser-equivalent
-malformed-markup recovery. Simple rows and cells are represented with tabs and
-line boundaries.
-
 ## Which tool should you choose?
 
 | Need | Choice |
 | --- | --- |
 | Fixed-policy readable text, hostile-input bounds, and portable Web streaming | Choose Purifai |
-| Selectors, custom formatters, advanced tables, wrapping, and broader formatting control | Choose `html-to-text` |
+| Selectors, custom formatters, advanced tables, wrapping, and broad formatting control | Choose `html-to-text` |
 | The smallest flat tag-removal operation | Choose stable `striptags` |
 | Preserve an allow-listed safe HTML fragment | Choose DOMPurify or `sanitize-html` |
 
-These tools are not interchangeable. In particular, DOMPurify and
-`sanitize-html` are the right category when safe markup must survive.
-
-## Benchmarks
-
-The checked category benchmark pins `striptags@3.2.0` and
-`html-to-text@10.0.0`. It measures exact readability/body-removal fixtures,
-isolated warm median and p95 one-shot latency, and fresh-process peak RSS. The
-throughput path gives every package the same materialized string; the memory path
-lets Purifai consume lazy 16,384-code-unit chunks because streaming ingestion is
-the product claim.
-
-On the recorded Apple M1 / Node 24 run, Purifai passed all 11 category gates: all
-readability and body-removal fixtures, lower hostile-input p95 than
-`html-to-text` on four hostile corpora, and lower streaming peak RSS on all five
-memory corpora. `striptags` remains faster on some flat-strip cases, which is not
-Purifai's claim.
-
-See the [complete methodology, raw-result link, and tables](docs/benchmarks/v3.md).
-Reproduce it with `pnpm run bench`; re-check the saved gates with
-`pnpm run bench:check`.
-
-## Size and runtime matrix
-
-The complete minified ESM runtime—including the full 2,231-name WHATWG entity
-data—is gated at 25 KiB using deterministic `gzip -9`. The recorded artifact is
-23,689 bytes. `pnpm run test:size` also checks the packed exports, zero runtime
-dependencies, cold import time, and retained import heap.
-
-The release matrix exercises the same packed ESM artifact:
-
-| Runtime | Required release coverage |
-| --- | --- |
-| Node.js | 22, 24, and 26; ESM and CommonJS |
-| Bun | ESM and CommonJS consumers |
-| Deno | ESM consumer |
-| Cloudflare Workers | real `workerd`, without Node compatibility |
-| Browsers | Chromium, Firefox, and WebKit |
-
-Browser qualification also reparses escaped output in a real DOM with a working
-positive control. This validates the documented sinks; it is not a universal
-claim about every output context.
+These categories are not interchangeable. DOMPurify and `sanitize-html` are
+the correct category when safe markup must survive.
 
 ## Migration and development
 
 V3 is a clean break. See the [v3 migration guide](docs/migration-v3.md) for every
-removed export and option. Contributor setup and the full verification commands
-are in [CONTRIBUTING.md](CONTRIBUTING.md).
+removed export and option.
+
+- [Runnable examples](examples)
+- [Contributor guide](CONTRIBUTING.md)
+- [Project notes](https://worksonmy.dev/projects/purifai)
+- [Issues](https://github.com/moji2002/purifai/issues)
 
 ## License
 
-MIT
+[MIT](LICENSE)
