@@ -1,6 +1,6 @@
 {
   "name": "purifai",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Bounded streaming conversion from untrusted HTML to readable plain text, with zero dependencies and no DOM.",
   "main": "dist/index.js",
   "module": "dist/index.js",

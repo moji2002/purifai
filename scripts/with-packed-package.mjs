@@ -5,6 +5,7 @@ import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const rootManifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -66,7 +67,7 @@ export async function withPackedPackage(callback) {
 
     const packageRoot = resolve(temporary, 'node_modules/purifai');
     const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'));
-    if (manifest.name !== 'purifai' || manifest.version !== '3.0.0') {
+    if (manifest.name !== rootManifest.name || manifest.version !== rootManifest.version) {
       throw new Error(`Unexpected packed package identity: ${manifest.name}@${manifest.version}`);
     }
     if (manifest.dependencies && Object.keys(manifest.dependencies).length > 0) {

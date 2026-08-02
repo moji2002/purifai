@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const rootManifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const temporary = await mkdtemp(join(tmpdir(), 'purifai-package-'));
 const packCommand = process.env.PURIFAI_PACK_COMMAND ?? 'pnpm';
 
@@ -55,7 +56,7 @@ try {
   const packageRoot = join(temporary, 'package');
   const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'));
   assert.equal(manifest.name, 'purifai');
-  assert.equal(manifest.version, '3.0.0');
+  assert.equal(manifest.version, rootManifest.version);
   assert.equal('dependencies' in manifest, false);
 
   const packedFiles = await filesBelow(packageRoot);
