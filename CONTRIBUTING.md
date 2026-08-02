@@ -45,7 +45,7 @@ Be respectful and constructive. We follow the standard [Contributor Covenant](ht
 
 ## Security
 
-If you find a security issue, please do not open a public issue. Instead, email `moji2002@gmail.com` with details.
+If you find a security issue, please do not open a public issue. Instead, email `it@worksonmy.dev` with details.
 
 ## Questions
 
