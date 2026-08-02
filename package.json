@@ -27,7 +27,7 @@
     "build": "tsup index.ts --format cjs,esm --minify --clean && pnpm run build:dts",
     "build:dts": "tsc -p tsconfig.dts.json && node -e \"require('fs').copyFileSync('dist/index.d.ts','dist/index.d.cts')\"",
     "test": "pnpm run test:core",
-    "test:unit": "pnpm run build && node --test test/v3/api.test.js test/v3/entities.test.js test/v3/entities-exhaustive.test.js test/v3/scanner.test.js test/v3/readability.test.js test/v3/special-elements.test.js test/v3/links-images.test.js test/v3/limits.test.js test/v3/stream.test.js",
+    "test:unit": "pnpm run build && node --test test/v3/api.test.js test/v3/entities.test.js test/v3/entities-exhaustive.test.js test/v3/scanner.test.js test/v3/readability.test.js test/v3/special-elements.test.js test/v3/links-images.test.js test/v3/limits.test.js test/v3/stream.test.js test/v3/provenance.test.js",
     "test:core": "pnpm run entities:check && pnpm run typecheck && pnpm run test:unit && pnpm run test:fuzz && pnpm run test:sinks && node test/package-smoke.mjs",
     "test:fuzz": "pnpm run build && node --test test/v3/fuzz.test.js",
     "test:sinks": "pnpm run build && node --test test/v3/sinks.test.js",
